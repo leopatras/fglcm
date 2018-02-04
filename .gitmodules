@@ -1,0 +1,3 @@
+[submodule "webcomponents/fglcm/codemirror"]
+	path = webcomponents/fglcm/codemirror
+	url = https://github.com/codemirror/CodeMirror.git
