@@ -18,4 +18,5 @@ if [ $? -ne 0 ] ; then
   echo "can't get keywords"
   exit 1
 fi
-cat 4gl.js | awk -f mix.awk > webcomponents/fglcm/codemirror/mode/4gl/4gl.js
+#cat 4gl.js | awk -f mix.awk > webcomponents/fglcm/codemirror/mode/4gl/4gl.js
+cat 4gl.js | awk -f mix.awk

@@ -25,22 +25,27 @@ define run-seq
   fglrun $* -run
 endef
 
-CM=./webcomponents/fglcm/codemirror
+FGLCM_WC_DIR=./webcomponents/fglcm
+CMDIR=$(FGLCM_WC_DIR)/codemirror
 
 MODS=$(patsubst %.4gl,%.42m,$(wildcard *.4gl))
 FORMS=$(patsubst %.per,%.42f,$(wildcard *.per))
-PROGS=$(patsubst %.42m,%.42r,$(MODS))
 
-all:: $(CM)/mode/4gl/4gl.js $(CM)/lib/codemirror.js $(MODS) $(FORMS) $(PROGS)
+all:: $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js $(MODS) $(FORMS)
 
-$(CM)/mode/4gl/4gl.js:
-	mkdir -p $(CM)/mode/4gl
-	./updatekeywords.sh
+$(FGLCM_WC_DIR)/customMode/4gl.js:
+	./updatekeywords.sh > $@
 
-$(CM)/lib/codemirror.js:
-	cp rollup.config.js $(CM)/
-	cd $(CM) && rollup -c
+$(CMDIR)/lib/codemirror.js: #some trial and error is behind these lines..I hate depending on npm modules as it seems to be permanently broken 
+	#npm install -g rollup
+	#cp rollup.config.js $(CMDIR)/
+	#cd $(CMDIR) && npm install rollup-plugin-buble && rollup -c
+	cd $(CMDIR) && npm install
+
+demo: all
+	fglrun cm test/foo.4gl
 
 clean:
-	rm -f *.42?  $(CM)/mode/4gl/4gl.js $(CM)/lib/codemirror.js
+	rm -f *.42?  keywords.js $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js
+	cd $(CMDIR) && git clean -fdx && cd -
 	make -C webcomponents/fglcm clean

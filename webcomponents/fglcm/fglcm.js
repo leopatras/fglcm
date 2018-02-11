@@ -14,10 +14,11 @@ try {
 }
 
 var m_inSetValue=false;
-var m_state=null;
+//var m_state=null;
 var proparr=[];
 var m_completionId=null;
 var m_syncId=null;
+var m_updateId=null;
 var m_lines=[];
 var m_orglines=[];
 var m_removed=[]; //stores the removed lines
@@ -25,6 +26,8 @@ var m_initialLineCount=1;
 var m_lineCount=1;
 var m_crcTable=[];
 var e_states = { initial:"initial",modified:"modified", inserted:"inserted" };
+var m_annotations=[];
+var m_editor=null;
 
 function initCRCTable(){
   var c;
@@ -54,6 +57,7 @@ function setEditorValue(editor,txt) {
   m_inSetValue=false;
   var doc=editor.getDoc();
   var cnt=doc.lineCount();
+  m_lines=[];
   for (var i=0;i<cnt;i++) {
     m_lines[i] = { state:e_states.initial , line:doc.getLine(i), orgnum:i };
     if (m_syncLocal) {
@@ -87,6 +91,7 @@ function coalesceIntArr(arr) {
 }
 
 function sync() {
+  var editor=m_editor;
   var modlines=[];
   //apply changes and collect inserts
   var lastOrgnum=-1;
@@ -128,11 +133,16 @@ function sync() {
   if (m_syncLocal) {
     syncLocalRemovesAndInserts(coalescedRemoves,inserts);
   } else {
+    var t0 = performance.now();
     var full=editor.getValue();
+    var t1 = performance.now();
+    console.log("crc32 took " + (t1 - t0) + " milliseconds.")
     var crc=crc32(full);
     var o={
       //full: editor.getValue(), //enable for debugging
-      crc: crc,
+      crc:crc,
+      len:full.length,
+      lineCount:editor.getDoc().lineCount(),
       modified: modlines,
       removed:coalescedRemoves,
       inserts:inserts,
@@ -142,10 +152,15 @@ function sync() {
     }
     renumberLines();
     m_removed=[];
-    gICAPI.SetData(JSON.stringify(o));
+    return JSON.stringify(o);
   };
 }
 
+function fcsync() {
+  return sync();
+}
+
+//only needed for testing without Genero
 function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
   //removed
   for (var i=coalescedRemoves.length-1;i>=0;i--) {
@@ -207,9 +222,9 @@ function renumberOrgLines() {
   }
 }
 
-function reset() {
-  renumberOrgLines();
-  renumberLines();
+function reset(editor) {
+  //renumberOrgLines();
+  //renumberLines();
   m_removed=[];
   m_orglines=[];
   m_lines=[];
@@ -226,13 +241,14 @@ function reset() {
 }
 
 //called whenever something is changed
+/*
 function fillValues(cm,o) {
   //o.full=cm.getValue();
   //o.full=(o.full===undefined)?null:o.full;
-  o.cursor1=editor.getCursor(true);
-  o.cursor2=editor.getCursor(false);
+  o.cursor1=cm.getCursor(true);
+  o.cursor2=cm.getCursor(false);
   //console.log("fillValues o:"+JSON.stringify(o));
-}
+}*/
 
 function onChange(cm,o) {
   //console.log("onChange, m_inSetValue:"+m_inSetValue+",o:"+JSON.stringify(o));
@@ -268,13 +284,20 @@ function onChange(cm,o) {
     m_lineCount=cnt;
   }
   //console.log("m_lines:"+JSON.stringify(m_lines));
-  fillValues(cm,o);
+  //fillValues(cm,o);
   //gICAPI.SetData(JSON.stringify(o));
-  if (editor.state.completionActive) {
+  /*
+  if (cm.state.completionActive) {
     console.log("completion active");
+    clearSyncTimer(); 
     m_syncId = setTimeout(function() {
        sendChange(cm,"complete",true);
     },200);
+  }
+  */
+  clearUpdateTimer();
+  if (fIs4GLOrPer(cm.EXTENSION)) {
+    m_updateId = setTimeout(checkUpdate,cm.state.completionActive?200:500);
   }
 }
 
@@ -291,6 +314,15 @@ function prepareRemoves(orgremoved,fromLine,toLine) {
   m_lines.splice(start,orgremoved.length-1);
 }
 
+function checkUpdate() {
+  clearUpdateTimer();
+  if (m_editor.state.completionActive) {
+    sendChange(m_editor,"complete",true);
+  } else {
+    sendChange(m_editor,"update",false);
+  }
+}
+
 function sendChange(cm,action,fromTimer) {
   //var o={};
   //onChange(cm,o);
@@ -303,7 +335,7 @@ function sendChange(cm,action,fromTimer) {
       return;
     }
   }
-  sync();
+  gICAPI.SetData(sync());
   gICAPI.Action(action);
 }
 
@@ -311,32 +343,78 @@ function onKeyHandled(cm,name,ev) {
   //console.log("keyHandled:"+name);
 }
 
-var editor = CodeMirror.fromTextArea(document.getElementById("editor"), {
-        lineNumbers: true,
-        /*indentUnit: 2,*/
-        /*scrollPastEnd: true,*/
-        theme: "eclipse",
-        mode: "text/x-4gl",
-        autofocus:true,
-        /*keyMap: "vim",*/
-        matchBrackets: true,
-        showCursorWhenSelecting: true
-        ,
-        extraKeys: {
+function myAnnotations(text, options) {
+  return m_annotations;
+}
+
+function fIs4GLOrPer(ext) {
+  return (ext=="4gl" || ext=="per");
+}
+
+function createEditor(ext) {
+   var ed=null;
+   if (m_editor) {
+     ed=document.getElementById("editor");
+     ed.parentNode.removeChild(ed);
+   }
+   ed=document.createElement("TEXTAREA"); 
+   ed.id="editor";
+   document.body.appendChild(ed);
+   var lint=true;
+   var extraKeys={};
+   var is4GLOrPer=fIs4GLOrPer(ext);
+   if (is4GLOrPer) {
+     lint = { 'getAnnotations': myAnnotations, 'lintOnChange': false };
+     extraKeys = {
+          /*
           "Cmd-S":function(cm) {
             sendChange(cm,"sync",false);
             return false;
           }
           ,
+          */
           "Tab":function(cm) {
-            m_state="complete";
+            //m_state="complete";
             sendChange(cm,"complete",false);
             return false;
           } 
-        }
-});
-editor.setOption("fullScreen",true);
-editor.on("change",onChange);
+        };
+   }
+   if (ext=="js") {
+      extraKeys =  {"Tab": "autocomplete"};
+   }
+   var modemap = {
+     "4gl"    : "4gl",
+     "js"     : "javascript",
+     "42f"    : "xml",
+     "fgldeb" : "xml"
+   }
+   var mode=modemap[ext];
+   if (mode===undefined) {
+     mode=ext;
+   }
+
+   m_editor = CodeMirror.fromTextArea(ed, {
+        lineNumbers: true,
+        /*indentUnit: 2,*/
+        /*scrollPastEnd: true,*/
+        theme: "eclipse",
+        mode: mode,
+        autofocus:true,
+        /*mylint: true,*/
+        lint: lint,
+        /*keyMap: "vim",*/
+        matchBrackets: true,
+        gutters: ["CodeMirror-lint-markers"],
+        showCursorWhenSelecting: true,
+        extraKeys: extraKeys
+  });
+  m_editor.EXTENSION=ext; //just glue our 4GL side extension var to the editor
+  m_editor.setOption("fullScreen",true);
+  m_editor.on("change",onChange);
+  reset(m_editor);
+}
+createEditor("4gl");
 //editor.on("keyHandled",onKeyHandled);
 
 //not much to do here, we just check if we
@@ -353,14 +431,14 @@ function get4GLHint(cm, c) {
      var word2=cm.findWordAt(prevCursor);
      var txt2=cm.getRange(word2.anchor, word2.head);
      console.log("txt2:'"+txt2+"'");
-     if (txt=="=") {
+     if (txt=="=" || txt==" ") {
        if (txt!=txt2) {
          console.log("switch to word2:"+txt2);
          word=word2;
          txt=txt2;
        } else {
          for(var i=0;i<proparr.length;i++) {
-           if(proparr[i]="=") {
+           if(proparr[i]=txt) {
              foundeq=true;
              break;
            }
@@ -375,11 +453,12 @@ function get4GLHint(cm, c) {
            from:word.anchor, to:word.head };
 }
 
+/*
 function getData() {
   var o={};
-  fillValues(editor,o);
+  fillValues(m_editor,o);
   return JSON.stringify(o);
-}
+}*/
 
 function clearCompletionAliveTimer() {
   if (m_completionId!==null) { 
@@ -395,31 +474,59 @@ function clearSyncTimer() {
   }
 }
 
+function clearUpdateTimer() {
+  if (m_updateId!==null) { 
+    clearTimeout(m_updateId); 
+    m_updateId=null; 
+  }
+}
+
 onICHostReady = function(version) {
    //console.log("onICHostReady");
    gICAPI.onFocus = function(polarity) {
    }
    gICAPI.onData = function(data) {
+     //alert("onData:"+data);
+     if (data===undefined || data===null) {
+       alert("onData with undefined or null, check your code!!!");
+       return;
+     }
      var o=JSON.parse(data);
-     console.log("onData m_state:"+m_state+",data:"+data);
+     //console.log("onData m_state:"+m_state+",data:"+data);
+     if (!o.vm) { return;} //VM has no changes
+     if (o.extension!==undefined) {
+       if (m_editor.EXTENSION!=o.extension) {
+         console.log("extension changed from:"+m_editor.EXTENSION+" to:",o.extension);
+         createEditor(o.extension);
+       }
+     }
      if (o.proparr!==undefined) {
        //alert("complete arr:"+data);
        proparr=o.proparr; //we preserve the completion list
        clearCompletionAliveTimer();
        m_completionId = setTimeout(function() {
-           editor.showHint({hint: get4GLHint});
+           m_editor.showHint({hint: get4GLHint});
          },50);
      }
-     if (!o.vm) { return;} //VM has no changes
      //alert("data:"+data);
      if (o.full!==undefined) {
-       if (o.full!==editor.getValue()) {
-         setEditorValue(editor,o.full);
+       if (o.full!==m_editor.getValue()) {
+         setEditorValue(m_editor,o.full);
        }
      }
-     if (o.cursor1.line!==undefined) {
+     if (o.cursor1!==undefined) {
        console.log("set cursor");
-       editor.setSelection( o.cursor1,o.cursor2 );
+       if (o.cursor2===undefined) {
+         o.cursor2=o.cursor1;
+       }
+       m_editor.setSelection( o.cursor1,o.cursor2 );
+     }
+     if (o.annotations!==undefined) {
+       m_annotations=o.annotations;
+       m_editor.performLint();
+     } else {
+       m_annotations=[];
+       m_editor.performLint();
      }
    }
 
@@ -429,7 +536,10 @@ onICHostReady = function(version) {
    }
 }
 
-//setEditorValue(editor,"1\n2\n3\n4\n5\n6");
+function tryMarkers() {
+  m_annotations=[ { from: new CodeMirror.Pos(1,0),to: new CodeMirror.Pos(1,2), severity: "error",message:"@blaba" } ];
+  //window.updateMarkers(m_editor,annotations);
+  m_editor.performLint();
+}
 
-//setEditorValue(editor,"1\n2\n3");
-reset();
+//reset(m_editor);
