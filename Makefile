@@ -30,15 +30,9 @@ all:: $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js $(MODS) $(FOR
 $(FGLCM_WC_DIR)/customMode/4gl.js:
 	./updatekeywords.sh > $@
 
-./fglwebrun:
-	-git submodule init fglwebrun
-	-git submodule update fglwebrun
-
-$(CMDIR):
-	-git submodule init $(CMDIR)
-	-git submodule update $(CMDIR)
-
-$(CMDIR)/lib/codemirror.js: #some trial and error is behind these lines..I hate depending on npm modules as it seems to be permanently broken 
+$(CMDIR)/lib/codemirror.js: $(CMDIR) #some trial and error is behind these lines..I hate depending on npm modules as it seems to be permanently broken 
+	-git submodule init 
+	-git submodule update 
 	#npm install -g rollup
 	#cp rollup.config.js $(CMDIR)/
 	#cd $(CMDIR) && npm install rollup-plugin-buble && rollup -c
