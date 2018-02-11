@@ -5,4 +5,14 @@
      <StyleAttribute name="actionPanelPosition" value="none" />
      <StyleAttribute name="ringMenuPosition"    value="none" />
   </Style>
+  <Style name="Window.dialog_resize">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="windowSheet" value="yes" />
+     <StyleAttribute name="sizable" value="yes" />
+     <StyleAttribute name="position" value="center2" />
+     <StyleAttribute name="actionPanelPosition" value="none" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+     <StyleAttribute name="toolBarPosition" value="none" />
+     <StyleAttribute name="forceDefaultSettings" value="yes" />
+  </Style>
 </StyleList>

@@ -1,11 +1,5 @@
 .SUFFIXES: .per .42f .4gl .42m .msg .img 
 
-.per.42f:
-	fglform -M $*
-
-.4gl.42m:
-	fglcomp -M -W all $<
-
 .msg.iem:
 	fglmkmsg $< $@
 
@@ -13,7 +7,7 @@
 	fglform -M $<
 
 %.42m: %.4gl 
-	fglcomp -M $*
+	fglcomp -r -M $*
 
 %.42r: %.42m
 	fgllink -o $@ $*.42m $(QAUTILS) $$FGLDIR/lib/libfgl4js.42x
@@ -36,6 +30,14 @@ all:: $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js $(MODS) $(FOR
 $(FGLCM_WC_DIR)/customMode/4gl.js:
 	./updatekeywords.sh > $@
 
+./fglwebrun:
+	-git submodule init fglwebrun
+	-git submodule update fglwebrun
+
+$(CMDIR):
+	-git submodule init $(CMDIR)
+	-git submodule update $(CMDIR)
+
 $(CMDIR)/lib/codemirror.js: #some trial and error is behind these lines..I hate depending on npm modules as it seems to be permanently broken 
 	#npm install -g rollup
 	#cp rollup.config.js $(CMDIR)/
@@ -45,7 +47,10 @@ $(CMDIR)/lib/codemirror.js: #some trial and error is behind these lines..I hate 
 demo: all
 	fglrun cm test/foo.4gl
 
-clean:
-	rm -f *.42?  keywords.js $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js
+clean_prog:
+	rm -f *.42? .*.42?
+
+clean: clean_prog
+	rm -f keywords.js $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js
 	cd $(CMDIR) && git clean -fdx && cd -
 	make -C webcomponents/fglcm clean

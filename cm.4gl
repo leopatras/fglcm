@@ -2,6 +2,7 @@ OPTIONS SHORT CIRCUIT
 IMPORT util
 IMPORT os
 IMPORT FGL fgldialog
+IMPORT FGL fglped_md_filedlg
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
@@ -245,9 +246,19 @@ FUNCTION compileTmp(tmpname,jump_to_error)
   IF is4GLORPer(tmpname) THEN
     LET compmess = saveAndCompile(tmpname,jump_to_error)
     IF compmess IS NULL THEN
-      MESSAGE "Compile ok"
+      CALL mymessage("Compile ok")
     END IF
   END IF
+END FUNCTION
+
+FUNCTION mymessage(msg)
+  DEFINE msg STRING
+  IF ui.Interface.getFrontEndName()=="GBC" THEN
+    --TODO
+    --the message block overlaps the editor with larger messages
+    RETURN
+  END IF
+  MESSAGE msg
 END FUNCTION
 
 FUNCTION update()
@@ -676,7 +687,7 @@ FUNCTION process_compile_errors(jump_to_error)
           LET m_error_line=line
           IF NOT first THEN
             LET first=TRUE
-            MESSAGE m_error_line
+            CALL mymessage(m_error_line)
           END IF
           --ERROR m_error_line
           IF linenumstr="0" THEN 
@@ -1010,10 +1021,29 @@ FUNCTION fglped_saveasdlg(fname)
   RETURN filename
 END FUNCTION
 
+{
 FUNCTION fglped_filedlg()
   DEFINE filename STRING
   CALL ui.Interface.frontCall("standard","openfile", [os.Path.pwd(), "All Files", "*", "Open File" ], [filename])
   RETURN filename
+END FUNCTION
+}
+FUNCTION fglped_filedlg()
+  DEFINE fname STRING
+  DEFINE r1 FILEDLG_RECORD
+  IF _isLocal() THEN
+    CALL ui.interface.frontCall("standard","openfile",[os.Path.pwd(),"Form Files","*.per","Please choose a form"],[fname])
+  ELSE
+    LET r1.title="Please choose a form"
+    LET r1.types[1].description="Genero files (*.4gl)"
+    LET r1.types[1].suffixes="*.4gl"
+    LET r1.types[2].description="Form files (*.per)"
+    LET r1.types[2].suffixes="*.per"
+    LET r1.types[3].description="All files (*.*)"
+    LET r1.types[3].suffixes="*.*"
+    LET fname= filedlg_open(r1.*)
+  END IF
+  RETURN fname
 END FUNCTION
 
 FUNCTION split_src(src)
