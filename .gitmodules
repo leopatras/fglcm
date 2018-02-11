@@ -1,3 +1,6 @@
 [submodule "webcomponents/fglcm/codemirror"]
 	path = webcomponents/fglcm/codemirror
 	url = https://github.com/codemirror/CodeMirror.git
+[submodule "fglwebrun"]
+	path = fglwebrun
+	url = https://github.com/FourjsGenero/tool_fglwebrun.git
