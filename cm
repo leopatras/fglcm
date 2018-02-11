@@ -1,0 +1,20 @@
+#!/bin/bash
+realpath() {
+    [[ $1 = /* ]] && echo "$1" || echo "$PWD/${1#./}"
+}
+
+fullname () {
+  local myDIR=`dirname "$1"`
+  pushd "$myDIR" >/dev/null
+  realDIR=`pwd`
+  popd > /dev/null
+  local basefile=`basename "$1"`
+  echo "$realDIR/$basefile"
+}
+
+SCRIPT_NAME=`fullname $0`
+FGLCMDIR=`dirname $SCRIPT_NAME` 
+#we recompile everything always: hence avoid version clashes
+make -C $FGLCMDIR clean_prog all > /dev/null
+export FGLCMDIR
+exec fglrun $FGLCMDIR/cm.42m "$@" 
