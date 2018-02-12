@@ -3,3 +3,4 @@ MAIN
   LET a1=fgl_buffertouched()
   LET a2=0
 END MAIN
+--ö"Γεια σου κόσμε"

@@ -42,13 +42,52 @@ function initCRCTable(){
 initCRCTable();
 
 function crc32(s) {
+    var ba=toUtf8ByteArray(s);
     var code = 0 ^ (-1);
-    var len=s.length;
+    var len=ba.length;
     for (var i = 0; i < len; i++ ) {
-      var charcode=s.charCodeAt(i);
+      var charcode=ba[i];
       code = (code >>> 8) ^ m_crcTable[(code ^ charcode) & 0xFF];
     }
     return (code ^ (-1)) >>> 0;
+}
+
+m_utf8encoder=null;
+try {
+  m_utf8encoder=new TextEncoder("utf-8");
+} catch (err) {
+  console.log("No TextEncoder:"+err.message);
+}
+
+function toUtf8ByteArray(str) {
+  if (m_utf8encoder) {
+    return m_utf8encoder.encode(str);
+  }
+  var out = [], p = 0;
+  var len=str.length;
+  for (var i = 0; i < len; i++) {
+    var c = str.charCodeAt(i);
+    if (c < 128) {
+      out[p++] = c;
+    } else if (c < 2048) {
+      out[p++] = (c >> 6) | 192;
+      out[p++] = (c & 63) | 128;
+    } else if (
+        ((c & 0xFC00) == 0xD800) && (i + 1) < str.length &&
+        ((str.charCodeAt(i + 1) & 0xFC00) == 0xDC00)) {
+      // Surrogate Pair
+      c = 0x10000 + ((c & 0x03FF) << 10) + (str.charCodeAt(++i) & 0x03FF);
+      out[p++] = (c >> 18) | 240;
+      out[p++] = ((c >> 12) & 63) | 128;
+      out[p++] = ((c >> 6) & 63) | 128;
+      out[p++] = (c & 63) | 128;
+    } else {
+      out[p++] = (c >> 12) | 224;
+      out[p++] = ((c >> 6) & 63) | 128;
+      out[p++] = (c & 63) | 128;
+    }
+  }
+  return out;
 }
 
 function setEditorValue(editor,txt) {
@@ -135,9 +174,9 @@ function sync() {
   } else {
     var t0 = performance.now();
     var full=editor.getValue();
+    var crc=crc32(full);
     var t1 = performance.now();
     console.log("crc32 took " + (t1 - t0) + " milliseconds.")
-    var crc=crc32(full);
     var o={
       //full: editor.getValue(), //enable for debugging
       crc:crc,
@@ -266,8 +305,8 @@ function onChange(cm,o) {
   var orgremoved=o.removed;
   try {
     prepareRemoves(orgremoved,fromLine,toLine);
-  } catch(msg) {
-    console.log("removed catch:"+msg);
+  } catch(err) {
+    console.log("removed catch:"+err.message);
   }
   var orginserts=o.text;
   var len=orginserts.length;

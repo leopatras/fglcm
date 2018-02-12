@@ -17,6 +17,7 @@ DEFINE m_cline,m_ccol INT
 DEFINE m_srcfile STRING
 DEFINE m_title STRING
 DEFINE compile_arr DYNAMIC ARRAY OF STRING
+DEFINE m_CRCProg STRING
 DEFINE m_CRCTable ARRAY[256] OF INTEGER
 DEFINE m_lastCRC BIGINT
 DEFINE m_modified BOOLEAN
@@ -84,6 +85,11 @@ MAIN
   DEFINE dummy INT
   CALL initCRC32Table()
   LET m_lastCRC=NULL
+  LET m_CRCProg=os.Path.fullPath(os.Path.join(os.Path.dirname(arg_val(0)),"crc32"))
+  DISPLAY "m_CRCProg:",m_CRCProg
+  IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
+    LET m_CRCProg=NULL
+  END IF
   CALL edit_source(arg_val(1)) RETURNING dummy
 END MAIN
 
@@ -816,20 +822,24 @@ FUNCTION file_write(srcfile)
   LET start=CURRENT
   LET result=file_write_int(srcfile,"w")
   DISPLAY "time for file_write:",CURRENT-start
-  LET start=CURRENT
-  CASE
-    WHEN m_lastCRC IS NOT NULL AND file_on_mac()
-      CALL checkSumMac(srcfile)
-      DISPLAY "time for cksum:",CURRENT-start,",crc32:",m_cmRec.crc
-  END CASE
+  IF m_lastCRC IS NOT NULL AND 
+      ( m_CRCProg IS NOT NULL OR file_on_mac() ) THEN
+    LET start=CURRENT
+    CALL checkCRCSum(srcfile)
+    DISPLAY "time for cksum:",CURRENT-start,",crc32:",m_cmRec.crc
+  END IF
   RETURN result
 END FUNCTION
 
-FUNCTION checkSumMac(fname)
+FUNCTION checkCRCSum(fname)
   DEFINE fname,s,cmd STRING
   DEFINE tok base.StringTokenizer
   DEFINE first BIGINT
-  LET cmd=sfmt("cksum -o 3 %1",fname)
+  IF m_CRCProg IS NOT NULL  THEN
+    LET cmd=sfmt("%1 %2",m_CRCProg,fname)
+  ELSE --only mac
+    LET cmd=sfmt("cksum -o 3 %1",fname)
+  END IF
   LET s=file_get_output_string(cmd)
   DISPLAY sfmt("%1 returned:%2",cmd,s)
   LET tok=base.StringTokenizer.create(s," ")
