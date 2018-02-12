@@ -36,7 +36,7 @@ $(CMDIR)/lib/codemirror.js: $(CMDIR) #some trial and error is behind these lines
 	#npm install -g rollup
 	#cp rollup.config.js $(CMDIR)/
 	#cd $(CMDIR) && npm install rollup-plugin-buble && rollup -c
-	cd $(CMDIR) && npm install
+	cd $(CMDIR) && npm install && ./node_modules/rollup/bin/rollup -c
 
 demo: all
 	fglrun cm test/foo.4gl
