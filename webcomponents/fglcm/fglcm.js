@@ -28,6 +28,8 @@ var m_crcTable=[];
 var e_states = { initial:"initial",modified:"modified", inserted:"inserted" };
 var m_annotations=[];
 var m_editor=null;
+var m_dataPending=false;
+var m_updateOnData=null;
 
 function initCRCTable(){
   var c;
@@ -336,7 +338,12 @@ function onChange(cm,o) {
   */
   clearUpdateTimer();
   if (fIs4GLOrPer(cm.EXTENSION)) {
-    m_updateId = setTimeout(checkUpdate,cm.state.completionActive?200:500);
+    if (m_dataPending) {
+      console.log("data pending after onChange:set dolater");
+      m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
+    } else {
+      m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?200:500);
+    }
   }
 }
 
@@ -353,13 +360,27 @@ function prepareRemoves(orgremoved,fromLine,toLine) {
   m_lines.splice(start,orgremoved.length-1);
 }
 
-function checkUpdate() {
+function checkUpdate(what) {
   clearUpdateTimer();
+  if (m_dataPending) {
+    console.log("datapending in update");
+    m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
+    return;
+  }
   if (m_editor.state.completionActive) {
     sendChange(m_editor,"complete",true);
   } else {
-    sendChange(m_editor,"update",false);
+    sendChange(m_editor,what,false);
   }
+}
+
+function checkUpdateOnData() {
+  if (m_updateOnData===null) {
+    return;
+  }
+  var what=m_updateOnData;
+  m_updateOnData=null;
+  checkUpdate(what);
 }
 
 function sendChange(cm,action,fromTimer) {
@@ -374,8 +395,12 @@ function sendChange(cm,action,fromTimer) {
       return;
     }
   }
-  gICAPI.SetData(sync());
+  m_dataPending=true;
+  var data=sync();
+  console.log("sendChange:"+data+",with action:"+action);
+  gICAPI.SetData(data);
   gICAPI.Action(action);
+  console.log("sendChange: finished");
 }
 
 function onKeyHandled(cm,name,ev) {
@@ -414,7 +439,13 @@ function createEditor(ext) {
           */
           "Tab":function(cm) {
             //m_state="complete";
-            sendChange(cm,"complete",false);
+            if (m_dataPending) {
+              console.log("Tab seen,data pending in completion");
+              m_updateOnData="complete";
+            } else {
+              console.log("Tab seen,sending completion");
+              sendChange(cm,"complete",false);
+            }
             return false;
           } 
         };
@@ -470,7 +501,9 @@ function get4GLHint(cm, c) {
      var word2=cm.findWordAt(prevCursor);
      var txt2=cm.getRange(word2.anchor, word2.head);
      console.log("txt2:'"+txt2+"'");
-     if (txt=="=" || txt==" ") {
+     if (txt=="." && txt2==".") {
+       word.head=word.anchor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
+     } else if (txt=="=" || txt==" ") {
        if (txt!=txt2) {
          console.log("switch to word2:"+txt2);
          word=word2;
@@ -526,13 +559,18 @@ onICHostReady = function(version) {
    }
    gICAPI.onData = function(data) {
      //alert("onData:"+data);
+     console.log("onData:"+data+",m_updateOnData:"+m_updateOnData);
      if (data===undefined || data===null) {
        alert("onData with undefined or null, check your code!!!");
        return;
      }
      var o=JSON.parse(data);
      //console.log("onData m_state:"+m_state+",data:"+data);
-     if (!o.vm) { return;} //VM has no changes
+     if (!o.vm) { //change was not issued by 4GL side ..GBC problem???
+       //checkUpdateOnData();
+       return;
+     } 
+     m_dataPending=false; 
      if (o.extension!==undefined) {
        if (m_editor.EXTENSION!=o.extension) {
          console.log("extension changed from:"+m_editor.EXTENSION+" to:",o.extension);
@@ -540,6 +578,7 @@ onICHostReady = function(version) {
        }
      }
      if (o.proparr!==undefined) {
+       console.log("prepareCompletion");
        //alert("complete arr:"+data);
        proparr=o.proparr; //we preserve the completion list
        clearCompletionAliveTimer();
@@ -567,6 +606,7 @@ onICHostReady = function(version) {
        m_annotations=[];
        m_editor.performLint();
      }
+     checkUpdateOnData();
    }
 
    gICAPI.onProperty = function(p) {
