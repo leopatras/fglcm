@@ -3,6 +3,7 @@ IMPORT util
 IMPORT os
 IMPORT FGL fgldialog
 IMPORT FGL fglped_md_filedlg
+IMPORT FGL fglped_fileutils
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
@@ -876,50 +877,6 @@ FUNCTION file_on_mac()
   RETURN _on_mac=="1"
 END FUNCTION
 
-FUNCTION file_get_output_string(cmd)
-  DEFINE cmd STRING
-  DEFINE arr DYNAMIC ARRAY OF STRING
-  DEFINE i,len INT
-  DEFINE result STRING
-  DEFINE buf base.StringBuffer
-  LET buf=base.StringBuffer.create()
-  CALL file_get_output(cmd,arr)
-  LET len=arr.getLength()
-  FOR i=1 TO len
-    CALL buf.append(arr[i])
-    IF i<>len THEN
-      CALL buf.append("\n")
-    END IF
-  END FOR
-  RETURN buf.toString()
-END FUNCTION
-
-FUNCTION file_get_output(program,arr)
-  DEFINE program,linestr STRING
-  DEFINE arr DYNAMIC ARRAY OF STRING
-  DEFINE mystatus,idx INTEGER
-  DEFINE c base.Channel
-  LET c = base.channel.create()
-  CALL c.setDelimiter("")
-  WHENEVER ERROR CONTINUE
-  CALL c.openpipe(program,"r")
-  LET mystatus=status
-  WHENEVER ERROR STOP
-  --DISPLAY "file_get_output:",program
-  IF mystatus THEN
-    DISPLAY "error in file_get_output(program,arr)"
-    --LET file_errstr=err_get(mystatus)
-    RETURN
-  END IF
-  --DISPLAY "file_get_output:",program
-  CALL arr.clear()
-  WHILE (linestr:=c.readline()) IS NOT NULL
-    LET idx=idx+1
-    --DISPLAY "LINE ",idx,"=",linestr
-    LET arr[idx]=linestr
-  END WHILE
-  CALL c.close()
-END FUNCTION
 
 FUNCTION cut_extension(pname)
   DEFINE pname STRING
@@ -1044,7 +1001,8 @@ FUNCTION fglped_filedlg()
   IF _isLocal() THEN
     CALL ui.interface.frontCall("standard","openfile",[os.Path.pwd(),"Form Files","*.per","Please choose a form"],[fname])
   ELSE
-    LET r1.title="Please choose a form"
+    LET r1.title="Please choose a file"
+    LET r1.opt_root_dir=os.Path.pwd()
     LET r1.types[1].description="Genero files (*.4gl)"
     LET r1.types[1].suffixes="*.4gl"
     LET r1.types[2].description="Form files (*.per)"

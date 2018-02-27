@@ -108,6 +108,52 @@ FUNCTION file_on_windows()
   END IF
 END FUNCTION
 
+FUNCTION file_get_output_string(cmd)
+  DEFINE cmd STRING
+  DEFINE arr DYNAMIC ARRAY OF STRING
+  DEFINE i,len INT
+  DEFINE result STRING
+  DEFINE buf base.StringBuffer
+  LET buf=base.StringBuffer.create()
+  CALL file_get_output(cmd,arr)
+  LET len=arr.getLength()
+  FOR i=1 TO len
+    CALL buf.append(arr[i])
+    IF i<>len THEN
+      CALL buf.append("\n")
+    END IF
+  END FOR
+  RETURN buf.toString()
+END FUNCTION
+
+FUNCTION file_get_output(program,arr)
+  DEFINE program,linestr STRING
+  DEFINE arr DYNAMIC ARRAY OF STRING
+  DEFINE mystatus,idx INTEGER
+  DEFINE c base.Channel
+  LET c = base.channel.create()
+  CALL c.setDelimiter("")
+  WHENEVER ERROR CONTINUE
+  CALL c.openpipe(program,"r")
+  LET mystatus=status
+  WHENEVER ERROR STOP
+  --DISPLAY "file_get_output:",program
+  IF mystatus THEN
+    DISPLAY "error in file_get_output(program,arr)"
+    --LET file_errstr=err_get(mystatus)
+    RETURN
+  END IF
+  --DISPLAY "file_get_output:",program
+  CALL arr.clear()
+  WHILE (linestr:=c.readline()) IS NOT NULL
+    LET idx=idx+1
+    --DISPLAY "LINE ",idx,"=",linestr
+    LET arr[idx]=linestr
+  END WHILE
+  CALL c.close()
+END FUNCTION
+
+{
 FUNCTION file_get_output(program,arr)
   DEFINE program,linestr STRING
   DEFINE arr DYNAMIC ARRAY OF STRING
@@ -135,6 +181,7 @@ FUNCTION file_get_output(program,arr)
   CALL c.close()
   RETURN 1
 END FUNCTION
+}
 
 FUNCTION file_start_output(program)
   DEFINE program STRING
@@ -207,21 +254,18 @@ FUNCTION file_get_dir_list(dirname,arr,pattern,complete_path,onlydirs)
     END IF
   END IF
   DISPLAY "cmd is:",cmd
-  IF NOT file_get_output(cmd,arr) THEN
-    RETURN 0
-  ELSE
-    LET len=arr.getLength()
-    FOR i=1 TO len
-      IF complete_path THEN
-        IF file_get_short_filename(arr[i])==arr[i] THEN
-          LET arr[i]=file_join(dirname,arr[i])
-        END IF
-      ELSE
-        LET arr[i]=file_get_short_filename(arr[i])
+  CALL file_get_output(cmd,arr)
+  LET len=arr.getLength()
+  FOR i=1 TO len
+    IF complete_path THEN
+      IF file_get_short_filename(arr[i])==arr[i] THEN
+        LET arr[i]=file_join(dirname,arr[i])
       END IF
-    END FOR
-    RETURN 1
-  END IF
+    ELSE
+      LET arr[i]=file_get_short_filename(arr[i])
+    END IF
+  END FOR
+  RETURN 1
 END FUNCTION
 
 --gives back the extension (plus point)
@@ -320,8 +364,6 @@ FUNCTION file_normalize_dir(fname)
   ELSE
     LET cmd="cd \"",fname,"\"&&pwd"
   END IF
-  IF NOT file_get_output(cmd,arr) THEN
-    RETURN fname
-  END IF
+  CALL file_get_output(cmd,arr)
   RETURN arr[1]
 END FUNCTION

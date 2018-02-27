@@ -13,6 +13,7 @@ PUBLIC TYPE FILEDLG_RECORD RECORD
     opt_choose_directory SMALLINT, -- if this is set the user can only choose directories
     opt_create_dirs SMALLINT,  -- allows the creation of a new subdirectory
     opt_delete_files SMALLINT, -- allows to delete files when running the dialog
+    opt_root_dir STRING, -- if set the dialog does not look above root
     types DYNAMIC ARRAY OF RECORD -- list for the file type combobox
       description STRING, -- string to display
       suffixes STRING -- pipe separated string of all possible suffixes for one entry
@@ -57,6 +58,18 @@ FUNCTION filedlg_open(r)
       END IF
       LET r.defaultpath = last_opendlg_directory
     END IF
+    IF r.opt_root_dir IS NOT NULL THEN
+      IF NOT os.Path.exists(r.opt_root_dir) OR NOT os.Path.isDirectory(r.opt_root_dir) THEN
+        CALL fgl_winMessage("Error",sfmt("wrong root dir:%1",r.opt_root_dir),"error")
+        RETURN NULL
+      END IF
+      LET r.opt_root_dir=os.Path.fullPath(r.opt_root_dir)
+      IF NOT isInsideDirectoryParent(r.defaultpath,r.opt_root_dir) THEN
+        LET r.defaultpath=r.opt_root_dir
+      ELSE
+        LET r.defaultpath=os.Path.fullPath(r.defaultpath)
+      END IF
+    END IF
     IF r.title IS NOT NULL THEN
       LET t = r.title
     ELSE
@@ -72,6 +85,38 @@ FUNCTION filedlg_open(r)
     END IF
   END IF
   RETURN fn
+END FUNCTION
+
+FUNCTION countComponents(fname)
+  DEFINE fname,next STRING
+  DEFINE cnt INT
+  DEFINE tok base.StringTokenizer
+  LET tok=base.StringTokenizer.create(fname,os.Path.separator())
+  WHILE (next:=tok.nextToken()) IS NOT NULL
+    LET cnt=cnt+1
+  END WHILE
+  RETURN cnt
+END FUNCTION
+
+FUNCTION isInsideDirectoryParent(path,dirname)
+  DEFINE path,dirname,cmp,p STRING
+  DEFINE pathC, cnt INT
+  LET cmp=os.Path.fullPath(dirname)
+  LET p=os.Path.fullPath(path)
+  LET pathC=countComponents(cmp)
+  --DISPLAY "cmp:",cmp,",p:",p,",pathC:",pathC
+  WHILE p IS NOT NULL AND (cnt:=countComponents(p))>=pathC
+    IF NOT os.Path.exists(p)  THEN
+      RETURN FALSE
+    END IF
+    IF p==cmp THEN
+      RETURN TRUE
+    END IF
+    --DISPLAY "cnt:",cnt
+    LET p=os.Path.fullPath(os.Path.dirName(p))
+    --DISPLAY "p:",p
+  END WHILE
+  RETURN FALSE
 END FUNCTION
 
 #+ Opens a file dialog to save a file.
@@ -134,6 +179,19 @@ FUNCTION _filedlg_fetch_filenames(d,currpath,typelist,currfile)
     CALL d.setCurrentRow("sr",1)
   END IF
   --CALL update_row(d.getCurrentRow("sr")) RETURNING dummy
+END FUNCTION
+
+FUNCTION _filedlg_checkTopdir(d,currpath,rootdir)
+  DEFINE d ui.Dialog
+  DEFINE currpath,rootdir,full STRING
+  CALL d.setActionActive("move_up",1)
+  IF rootdir IS NULL THEN
+    RETURN
+  END IF
+  LET full=os.Path.fullPath(currPath)
+  IF full == rootdir THEN --avoid going up
+    CALL d.setActionActive("move_up",0)
+  END IF
 END FUNCTION
 
 FUNCTION _filedlg_doDlg(dlgtype,title,r)
@@ -204,6 +262,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
 
     BEFORE DIALOG
       CALL _filedlg_fetch_filenames(DIALOG,currpath,ftype,filename)
+      CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
       LET win = ui.Window.getCurrent()
       LET form = win.getForm()
       DISPLAY "File:" TO lfn
@@ -240,6 +299,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
           LET filename=""
         END IF
       END IF
+      CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
     ON ACTION accept
 LABEL doaccept:
       LET doContinue=FALSE
@@ -291,6 +351,7 @@ LABEL doaccept:
       IF NOT doContinue THEN
         EXIT DIALOG
       END IF
+      CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
     ON ACTION cancel
       LET filepath=NULL
       EXIT DIALOG
@@ -304,6 +365,7 @@ LABEL doaccept:
       END IF
       LET currpath=file_normalize_dir(path)
       DISPLAY BY NAME currpath
+      CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
   END DIALOG
   CLOSE WINDOW _filedlg
   RETURN filepath
@@ -394,7 +456,7 @@ FUNCTION _filedlg_getfiles_int(dirpath,typelist)
       ELSE
          LET size = os.Path.size(pname)
       END IF
-      CALL _filedlg_appendEntry(isdir,fname,typelist,size,os.Path.mtime(pname))
+      CALL _filedlg_appendEntry(isdir,fname,typelist,size,os.Path.mtime(pname),dirpath)
   END WHILE
   CALL os.Path.dirclose(dh)
   IF m_r.opt_choose_directory  THEN
@@ -403,13 +465,13 @@ FUNCTION _filedlg_getfiles_int(dirpath,typelist)
 
 END FUNCTION
 
-FUNCTION _filedlg_appendEntry(isdir,name,typelist,size,modDate)
+FUNCTION _filedlg_appendEntry(isdir,name,typelist,size,modDate,dirpath)
   DEFINE isdir INT
   DEFINE name STRING
   DEFINE typelist STRING
   DEFINE size INT
-  DEFINE modDate STRING
-  DEFINE type,image,ext STRING
+  DEFINE modDate,dirpath STRING
+  DEFINE type,image,ext,full,link STRING
   DEFINE len INT
   IF isdir THEN
     LET ext=""
@@ -426,6 +488,32 @@ FUNCTION _filedlg_appendEntry(isdir,name,typelist,size,modDate)
   ELSE IF NOT isdir AND NOT _filedlg_checktypeandext(typelist,name) THEN
     RETURN
   END IF
+  END IF
+  IF m_r.opt_root_dir IS NOT NULL THEN
+    LET full=os.Path.fullPath(os.Path.join(dirpath,name))
+    --DISPLAY "isdir:",isdir,",full:",full
+    IF name=".." AND dirpath==m_r.opt_root_dir THEN
+      DISPLAY "omit '..' rootdir"
+      RETURN
+    END IF
+    IF os.Path.isLink(full) THEN
+      LET link=file_get_output_string(sfmt("readlink %1",full))
+      IF link.getIndexOf(".",1)==1 THEN
+        LET full=os.Path.fullPath(os.Path.join(dirpath,link))
+      ELSE
+        LET full=link
+      END IF
+      DISPLAY "link full:",full
+      IF os.Path.isDirectory(full) THEN
+        LET type=C_DIRECTORY
+        LET isdir=TRUE
+        LET image="folder"
+      END IF
+    END IF
+    IF isdir AND NOT isInsideDirectoryParent(full,m_r.opt_root_dir) THEN
+      DISPLAY "omit '",name,"'"
+      RETURN
+    END IF
   END IF
   IF m_r.opt_choose_directory AND NOT isdir THEN 
     CALL _flat_files.appendElement()
