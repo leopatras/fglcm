@@ -199,7 +199,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
   DEFINE title STRING
   DEFINE r FILEDLG_RECORD
   DEFINE currpath, path, filename, ftype, dirname, filepath STRING
-  DEFINE delfilename, errstr STRING
+  DEFINE delfilename, errstr,full STRING
   DEFINE doContinue, i INT
   DEFINE cb ui.ComboBox
   DEFINE form ui.Form
@@ -282,7 +282,9 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
       --nasty trick ,because Tables doubleclick actions are not
       --automagically locally associated with the <Return> key,
       --we have to check here if we are really in the table
-      IF (NOT _filedlg_focusInTable("sr")) OR (NOT r.opt_choose_directory) THEN
+      DISPLAY "focusInTable:", _filedlg_focusInTable("sr")
+      IF (NOT _filedlg_focusInTable("sr")) --OR (NOT r.opt_choose_directory) 
+      THEN
         GOTO doaccept
       END IF
       LET doContinue=FALSE
@@ -320,7 +322,20 @@ LABEL doaccept:
           LET filepath = file_join(currpath,filename)
         END IF
       END IF
-      IF file_exists(filepath) AND file_is_dir(filepath) THEN
+      IF r.opt_root_dir IS NOT NULL THEN --check the resulting file
+        LET full=os.Path.fullPath(filePath)
+        IF os.Path.isFile(full) OR os.Path.isLink(full) THEN
+          LET full=os.Path.dirname(full)
+        END IF
+        IF NOT isInsideDirectoryParent(full,m_r.opt_root_dir) THEN
+          LET errstr=SFMT(%"File or directory '%1' is outside your scope!",
+                          filename)
+          CALL _filedlg_mbox_ok("Error", errstr, "stop")
+          ERROR errstr
+          LET doContinue=1
+        END IF
+      END IF
+      IF (NOT doContinue) AND file_exists(filepath) AND file_is_dir(filepath) THEN
         --switch  the directory and refill the array
         LET currpath=file_normalize_dir(filepath)
         IF NOT r.opt_choose_directory THEN
