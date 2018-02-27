@@ -34,6 +34,7 @@ DEFINE _flat_files DYNAMIC ARRAY OF STRING
 DEFINE last_opendlg_directory STRING
 DEFINE last_savedlg_directory STRING
 DEFINE m_r FILEDLG_RECORD
+DEFINE m_lastType STRING
 CONSTANT C_DIRECTORY="Directory"
 CONSTANT C_OPEN="open"
 CONSTANT C_SAVE="save"
@@ -235,8 +236,12 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
   FOR i=1 TO r.types.getLength()
     CALL cb.addItem(r.types[i].suffixes,r.types[i].description)
   END FOR
-  IF r.types.getLength()>0 THEN
-    LET ftype=r.types[1].suffixes
+  IF m_lastType IS NOT NULL THEN
+    LET ftype=m_lastType
+  ELSE
+    IF r.types.getLength()>0 THEN
+      LET ftype=r.types[1].suffixes
+    END IF
   END IF
   CALL ui.Dialog.setDefaultUnbuffered(TRUE)
   OPTIONS FIELD ORDER CONSTRAINED
@@ -256,6 +261,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
     END DISPLAY
 
     INPUT BY NAME filename,ftype ATTRIBUTES(WITHOUT DEFAULTS)
+      BEFORE INPUT
       ON CHANGE ftype
         CALL _filedlg_fetch_filenames(DIALOG,currpath,ftype,NULL)
     END INPUT
@@ -290,7 +296,8 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
       LET doContinue=FALSE
       LET filepath = file_join(currpath,_filedlg_list[arr_curr()].entry)
       --IF r.opt_choose_directory THEN
-      IF file_exists(filepath) AND file_is_dir(filepath) THEN
+      CASE
+      WHEN file_exists(filepath) AND file_is_dir(filepath) 
         --switch  the directory and refill the array
         LET currpath=file_normalize_dir(filepath)
         CALL _filedlg_fetch_filenames(DIALOG,filepath,ftype,"..")
@@ -300,7 +307,9 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
         ELSE
           LET filename=""
         END IF
-      END IF
+      WHEN file_exists(filepath) AND os.Path.isFile(filepath)
+        GOTO doaccept
+      END CASE
       CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
     ON ACTION accept
 LABEL doaccept:
@@ -383,6 +392,7 @@ LABEL doaccept:
       CALL _filedlg_checkTopdir(DIALOG,currpath,r.opt_root_dir)
   END DIALOG
   CLOSE WINDOW _filedlg
+  LET m_lastType=ftype
   RETURN filepath
 END FUNCTION
 
