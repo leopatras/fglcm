@@ -15,4 +15,14 @@
      <StyleAttribute name="toolBarPosition" value="none" />
      <StyleAttribute name="forceDefaultSettings" value="yes" />
   </Style>
+  <Style name="Window.dialog">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="windowSheet" value="yes" />
+     <StyleAttribute name="sizable" value="yes" />
+     <StyleAttribute name="position" value="center2" />
+     <StyleAttribute name="actionPanelPosition" value="bottom" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+     <StyleAttribute name="toolBarPosition" value="none" />
+     <StyleAttribute name="forceDefaultSettings" value="yes" />
+  </Style>
 </StyleList>
