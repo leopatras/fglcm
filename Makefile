@@ -7,13 +7,10 @@
 	fglform -M $<
 
 %.42m: %.4gl 
-	fglcomp -r -M $*
+	fglcomp -r -M -Wall $*
 
-%.42r: %.42m
-	fgllink -o $@ $*.42m $(QAUTILS) $$FGLDIR/lib/libfgl4js.42x
-
-%.iem: %.msg
-	fglmkmsg $< $@
+#%.iem: %.msg
+#	fglmkmsg $< $@
 
 define run-seq
   fglrun $* -run
@@ -26,16 +23,23 @@ MODS=$(patsubst %.4gl,%.42m,$(wildcard *.4gl))
 FORMS=$(patsubst %.per,%.42f,$(wildcard *.per))
 
 UNAME:=$(shell uname)
-$(warning uname is $(UNAME))
+#$(warning uname is $(UNAME))
 #we build the home grown mini crc32 checker until someone finds *the* standard way to do it on linux
 ifeq ($(UNAME),Linux)
   CRC32=./crc32
 endif
 
-all:: $(CRC32) $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js $(MODS) $(FORMS)
+all:: $(CRC32) $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js $(CMDIR)/lib/codemirror.js cm.42m $(FORMS)
 
-$(FGLCM_WC_DIR)/customMode/4gl.js:
-	./updatekeywords.sh > $@
+cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m
+
+fglped_md_filedlg.42m: fglped_fileutils.42m
+
+$(FGLCM_WC_DIR)/customMode/4gl.js:4gl.js updatekeywords.sh mix.awk
+	./updatekeywords.sh 4gl> $@
+
+$(FGLCM_WC_DIR)/customMode/per.js:per.js updatekeywords.sh mix.awk
+	./updatekeywords.sh per> $@
 
 ./crc32: crc32.c
 	cc -O2 -Wall -o $@ crc32.c
