@@ -1,3 +1,4 @@
+#!/bin/bash
 #we create a new 4gl.js based on fgl.vim
 if [ -z "$FGLDIR" ] ; then
   echo "FGLDIR must be set"
