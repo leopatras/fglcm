@@ -15,7 +15,7 @@ try {
 
 var m_inSetValue=false;
 //var m_state=null;
-var proparr=[];
+var m_proparr=[];
 var m_completionId=null;
 var m_syncId=null;
 var m_updateId=null;
@@ -457,7 +457,8 @@ function createEditor(ext) {
      "4gl"    : "4gl",
      "js"     : "javascript",
      "42f"    : "xml",
-     "fgldeb" : "xml"
+     "fgldeb" : "xml",
+     "4st"    : "xml"
    }
    var mode=modemap[ext];
    if (mode===undefined) {
@@ -486,42 +487,53 @@ function createEditor(ext) {
 }
 createEditor("4gl");
 //editor.on("keyHandled",onKeyHandled);
+function isInPropArr(txt) {
+  for(var i=0;i<m_proparr.length;i++) {
+    if(m_proparr[i]===txt) {
+      return true;
+    }
+  }
+  return false;
+}
 
-//not much to do here, we just check if we
-//have spaces under the cursor
 function get4GLHint(cm, c) {
    var cursor=cm.getCursor();
    var word = cm.findWordAt(cursor);
    console.log("word:"+JSON.stringify(word));
    var txt=cm.getRange(word.anchor, word.head);
+   var re_noalnum=/^["'\^%\*\-\+,= \\/\.\[\](){};]+$/;
+   var isAlNum=true;
+   if (txt.length>=1 && re_noalnum.test(txt)) {
+     var nextCursor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
+     txt=cm.getRange(cursor, nextCursor);
+     console.log("word is not noalnum");
+     isAlNum=false;
+     word.head=cursor;
+     word.anchor=cursor;
+   }
    console.log("txt:'"+txt+"'");
    var foundeq=false;
-   if (cursor.ch>0) {
+   if (cursor.ch>0 && isAlNum) {
      var prevCursor=new CodeMirror.Pos(cursor.line,cursor.ch-1);
      var word2=cm.findWordAt(prevCursor);
      var txt2=cm.getRange(word2.anchor, word2.head);
      console.log("txt2:'"+txt2+"'");
-     if (txt=="." && txt2==".") {
+     if ((txt=="." && txt2==".")||(txt=='"' && txt2=='"')) {
        word.head=word.anchor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
-     } else if (txt=="=" || txt==" ") {
+     } else if (re_noalnum.test(txt) /*|| isInPropArr(txt2)*/) {
        if (txt!=txt2) {
          console.log("switch to word2:"+txt2);
          word=word2;
          txt=txt2;
        } else {
-         for(var i=0;i<proparr.length;i++) {
-           if(proparr[i]=txt) {
-             foundeq=true;
-             break;
-           }
-         }
+         foundeq=isInPropArr(txt);
        }
      }
    }
    if(foundeq || /^\s+$/.test(txt)) { //we found only spaces
      word.anchor=word.head;
    }
-   return {list: proparr,
+   return {list: m_proparr,
            from:word.anchor, to:word.head };
 }
 
@@ -580,7 +592,7 @@ onICHostReady = function(version) {
      if (o.proparr!==undefined) {
        console.log("prepareCompletion");
        //alert("complete arr:"+data);
-       proparr=o.proparr; //we preserve the completion list
+       m_proparr=o.proparr; //we preserve the completion list
        clearCompletionAliveTimer();
        m_completionId = setTimeout(function() {
            m_editor.showHint({hint: get4GLHint});

@@ -3,19 +3,20 @@ ACTION DEFAULTS
   --ACTION newfromwiz ( Text="New From &Wizard", COMMENT="Creates a new form using the fglped wizard")
   ACTION saveas ( Text="Save &As", COMMENT="Saves the form under another name"  )
   --ACTION browse ( Text="Browse..", COMMENT="Browses all forms in the directory of the current form" ,ACCELERATOR=CONTROL-B )
-  ACTION close ( Text="&Close", COMMENT="Closes this window", ACCELERATOR=ALT-F4,ACCELERATOR2=CONTROL-W)
-  ACTION compile ( Text="&Compile", COMMENT="compiles", ACCELERATOR=F5)
-  ACTION preview ( Text="&Preview(Compile)", COMMENT="compiles and refreshes the form,shows errrors in a message box", ACCELERATOR=F5)
+  ACTION close ( Text="&Exit", COMMENT="Closes this window", ACCELERATOR=ALT-F4,ACCELERATOR2=CONTROL-W)
+  --ACTION compile ( Text="&Compile", COMMENT="compiles", ACCELERATOR=F5)
+  ACTION preview ( Text="&Preview Form", COMMENT="Previews the current form if it is compilable", ACCELERATOR=CONTROL-B,ACCELERATOR2=F6)
   ACTION viewerr ( Text="View &Error", COMMENT="compiles and refreshes the form,jumps immediately to the first error", ACCELERATOR=F6)
   --ACTION previewopt ( Text="P&reviewOpt", COMMENT="compiles,postprocess and refreshes the form", ACCELERATOR=F6)
   ACTION open ( Text="&Open...", COMMENT="Opens an existing file", ACCELERATOR=CONTROL-O)
   ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=CONTROL-S)
+  ACTION run (TEXT="Run", COMMENT="Runs the current program" ,ACCELERATOR=F5,ACCELERATOR=CONTROL-R)
   --ACTION jump_to_def( TEXT="Jump to Definition")
   --ACTION find ( TEXT="Find..." ,COMMENT ="Finds the specified text",ACCELERATOR=CONTROL-F,IMAGE="find" )
   --ACTION findnext  ( TEXT="Find Next", comment="Finds the next occurence of the search string", ACCELERATOR=F3 ,image="empty")
   --ACTION jump_to_def ( TEXT="Jump to definition" ,IMAGE="arrdown",ACCELERATOR=F2)
   --ACTION findword (TEXT="Find Word", COMMENT="Finds the next occurence of the word the cursor is over" ,ACCELERATOR=CONTROL-W)
-  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=CONTROL-G)
+  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=CONTROL-L)
   --ACTION replace ( TEXT="Replace..." ,COMMENT ="Replaces the specified text with another text",ACCELERATOR=CONTROL-H)
   --ACTION replaceagain ( TEXT="Replace Again" ,COMMENT ="Replaces the current searched text with the value from the replace dialog",ACCELERATOR=F4)
   --ACTION undolastreplace ( TEXT="Undo last replace", COMMENT = "Rolls back the change from the last replace operation", ACCELERATOR=SHIFT-F4)
@@ -25,13 +26,13 @@ END
 
 TOPMENU
   GROUP top_file (TEXT="File")
-    COMMAND new (TEXT="New")
+    --COMMAND new (TEXT="New")
     --COMMAND newfromwiz
     COMMAND open
     SEPARATOR
     COMMAND close
     COMMAND save 
-    COMMAND saveas (TEXT="Save As...")
+    --COMMAND saveas (TEXT="Save As...")
     --COMMAND browse (TEXT="Browse...")
   END
   GROUP edit (TEXT="Edit")
@@ -43,7 +44,7 @@ TOPMENU
   --  COMMAND replaceagain
   --  COMMAND undolastreplace
   --  SEPARATOR
-    COMMAND compile
+    --COMMAND compile
     COMMAND gotoline
   --  COMMAND jump_to_def 
   --  SEPARATOR
@@ -51,6 +52,10 @@ TOPMENU
   --  COMMAND editpaste
   --  COMMAND editcut
   END
+  GROUP(TEXT="Product")
+      COMMAND preview
+      COMMAND run
+  END 
   --GROUP(TEXT="View")
   --  COMMAND preview 
   --  COMMAND viewerr
@@ -61,36 +66,39 @@ END
 LAYOUT
 GRID
 {
-[cm                                                                             ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
-[                                                                               ]
+[cm                                                                                         ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
+[                                                                                           ]
 }
 END
 ATTRIBUTES

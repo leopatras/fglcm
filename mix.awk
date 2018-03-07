@@ -1,4 +1,4 @@
-#mixes the content of keywords.js into 4gl.js
+#mixes the content of keywords.js into 4gl.js/per.js
 BEGIN { idx=0;output_once=1;while (getline < "keywords.js") { f[idx++]=$0;} }
 /^var keywords/ , /^\}\/\/keywords/ { 
   inmatch=1;

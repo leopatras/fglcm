@@ -5,6 +5,12 @@
      <StyleAttribute name="actionPanelPosition" value="none" />
      <StyleAttribute name="ringMenuPosition"    value="none" />
   </Style>
+  <Style name="Window.preview">
+     <StyleAttribute name="actionPanelPosition" value="right" />
+     <StyleAttribute name="ringMenuPosition"    value="right" />
+     <StyleAttribute name="position" value="center2" />
+     <StyleAttribute name="forceDefaultSettings"  value="yes" />
+  </Style>
   <Style name="Window.dialog_resize">
      <StyleAttribute name="windowType" value="modal" />
      <StyleAttribute name="windowSheet" value="yes" />
@@ -15,6 +21,16 @@
      <StyleAttribute name="toolBarPosition" value="none" />
      <StyleAttribute name="forceDefaultSettings" value="yes" />
   </Style>
+  <Style name="Window.dialog_nostatus">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="xwindowSheet" value="yes" />
+     <StyleAttribute name="position" value="center2" />
+     <StyleAttribute name="actionPanelPosition" value="bottom" />
+     <StyleAttribute name="ringMenuPosition" value="bottom" />
+     <StyleAttribute name="toolBarPosition" value="none" />
+     <StyleAttribute name="forceDefaultSettings" value="yes" />
+     <StyleAttribute name="statusBarType" value="none" />
+  </Style>
   <Style name="Window.dialog">
      <StyleAttribute name="windowType" value="modal" />
      <StyleAttribute name="windowSheet" value="yes" />
@@ -24,5 +40,8 @@
      <StyleAttribute name="ringMenuPosition" value="none" />
      <StyleAttribute name="toolBarPosition" value="none" />
      <StyleAttribute name="forceDefaultSettings" value="yes" />
+  </Style>
+  <Style name=".scale">
+     <StyleAttribute name="scaleIcon" value="yes" />
   </Style>
 </StyleList>

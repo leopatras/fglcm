@@ -7,12 +7,9 @@ IMPORT FGL fglped_fileutils
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
-CONSTANT S_TYPE_CHANGED="typeChanged"
-CONSTANT S_CLOSED="closed"
+CONSTANT S_CANCEL="cancel"
 
 TYPE proparr_t DYNAMIC ARRAY OF STRING
-
---DEFINE cm STRING
 DEFINE m_error_line STRING
 DEFINE m_cline,m_ccol INT
 DEFINE m_srcfile STRING
@@ -22,7 +19,11 @@ DEFINE m_CRCProg STRING
 DEFINE m_CRCTable ARRAY[256] OF INTEGER
 DEFINE m_lastCRC BIGINT
 DEFINE m_modified BOOLEAN
+DEFINE m_IsNewFile BOOLEAN
+DEFINE m_NewFileExt STRING
 DEFINE m_cmdIdx INT
+DEFINE m_lastCompiled4GL STRING
+DEFINE m_lastCompiledPER STRING
 DEFINE _on_mac STRING --cache the file_on_mac
 CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 
@@ -83,67 +84,74 @@ DEFINE m_cmRec CmType
 DEFINE m_cm STRING
 
 MAIN
-  DEFINE dummy INT
-  CALL initCRC32Table()
+  DEFINE result INT
+  CALL ui.Interface.loadStyles("fglcm")
+  --CALL initCRC32Table()
   LET m_lastCRC=NULL
   LET m_CRCProg=os.Path.fullPath(os.Path.join(os.Path.dirname(arg_val(0)),"crc32"))
   DISPLAY "m_CRCProg:",m_CRCProg
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg=NULL
   END IF
-  CALL edit_source(arg_val(1)) RETURNING dummy
+  LET result=edit_source(arg_val(1))
+  EXIT PROGRAM result
 END MAIN
 
 --main INPUT to edit the form, everything is called from here
 FUNCTION edit_source(fname)
   DEFINE fname STRING
-  DEFINE proparr proparr_t
   DEFINE changed INTEGER
   DEFINE jump_to_error BOOLEAN
-  DEFINE tmpname,ans,result,cname,saveasfile,dummy STRING
-  --IF ui.Window.forName("screen") IS NULL THEN
-  --  OPEN WINDOW screen WITH FORM "cm"
-  --ELSE
-    OPEN FORM f FROM "cm"
-    DISPLAY FORM f
-  --END IF
+  DEFINE tmpname,ans,cname,saveasfile,dummy STRING
+  OPEN FORM f FROM "cm"
+  DISPLAY FORM f
   LET changed=1
   IF fname IS NULL THEN
     LET m_srcfile=NULL
-    CALL file_new()
+    IF file_new(NULL)==S_CANCEL THEN
+      RETURN 1
+    END IF
   ELSE
     LET m_srcfile=fname
     IF NOT file_read(m_srcfile) THEN
-      IF (ans:=fgl_winquestion("fglped",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),"yes","yes|no|cancel","question",0))="cancel" THEN
+      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),"yes","yes|no|cancel","question",0))=S_CANCEL THEN
         RETURN 1
       END IF
-      CALL file_new()
+      IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
+        RETURN 1
+      END IF
       IF ans="yes" THEN
         IF NOT my_write(m_srcfile) THEN
-          EXIT PROGRAM 1
+          RETURN 1
         END IF
       ELSE
-        EXIT PROGRAM 1
+        RETURN 1
       END IF
     END IF
   END IF
   LET tmpname=setCurrFile(m_srcfile,tmpname)
   CALL savelines()
-  CALL initialize_when(TRUE)
-  CALL compileTmp(tmpname,TRUE)
-  CALL display_full(FALSE,FALSE)
-  CALL flush_cm()
   OPTIONS INPUT WRAP
   INPUT m_cm WITHOUT DEFAULTS FROM cm ATTRIBUTE(accept=FALSE,cancel=FALSE)
+    BEFORE INPUT
+      CALL DIALOG.setActionActive("run",FALSE)
+      CALL DIALOG.setActionActive("preview",FALSE)
+      CALL initialize_when(TRUE)
+      CALL compileTmp(tmpname,TRUE)
+      CALL display_full(FALSE,FALSE)
+      CALL flush_cm()
+    ON ACTION run
+      CALL runprog(tmpname)
+    ON ACTION preview
+      CALL preview_form()
     ON ACTION close
       CALL fcsync()
-      IF checkFileSave()="cancel" THEN
+      IF checkFileSave()=S_CANCEL THEN
         CONTINUE INPUT
       ELSE
         EXIT INPUT
       END IF
     ON ACTION complete
-      --LET src=update() 
       CALL sync() 
       IF NOT my_write(tmpname) THEN
         EXIT INPUT
@@ -160,7 +168,6 @@ FUNCTION edit_source(fname)
       LET jump_to_error=FALSE
       GOTO do_compile
     ON ACTION compile
-      --LET src=update() 
       CALL fcsync()
       LET jump_to_error=TRUE
 LABEL do_compile:
@@ -169,43 +176,39 @@ LABEL do_compile:
       CALL flush_cm()
     ON ACTION new
       CALL fcsync()
-      IF (ans:=checkFileSave())="cancel" THEN CONTINUE INPUT END IF
-      CALL file_new()
-      CALL display_full(TRUE,TRUE)
+      IF (ans:=checkFileSave())=S_CANCEL THEN CONTINUE INPUT END IF
+      CALL initialize_when(TRUE)
+      IF (file_new(NULL)==S_CANCEL) THEN CONTINUE INPUT END IF
+      CALL display_full(FALSE,FALSE)
       LET tmpname=setCurrFile("",tmpname)
+      CALL flush_cm()
     ON ACTION open
-      --LET src = update()
       CALL fcsync()
-      IF (ans:=checkFileSave())="cancel" THEN CONTINUE INPUT END IF
+      IF (ans:=checkFileSave())=S_CANCEL THEN CONTINUE INPUT END IF
       CALL initialize_when(TRUE)
       IF ans="no" THEN 
-        --LET src=src_copy 
-        CALL restorelines()
         CALL display_full(FALSE,FALSE)
       END IF
-      --LET src_copy = src
       CALL savelines()
-      --LET m_infiledlg=1
       LET cname = fglped_filedlg()
-      --LET m_infiledlg=0
---LABEL doOpen:
       IF cname IS NOT NULL THEN
         IF NOT file_read(cname) THEN
-          --LET src=src_copy
           CALL restorelines()
           CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
+          LET cname=NULL
         ELSE
-          --LET src_copy = src
+          LET m_lastCRC=NULL
           CALL savelines()
           LET tmpname = setCurrFile(cname,tmpname)
           CALL display_full(FALSE,FALSE)
-          --CALL close_sc_window()
-          --GOTO dopreview
+        END IF
+        IF NOT isPERFile(tmpname) THEN
+          CALL setActionActive("preview",FALSE)
         END IF
       ELSE
-        --LET src = open_copy
         --CALL display_full()
       END IF
+      CALL compileTmp(tmpname,cname IS NOT NULL)
       CALL flush_cm()
     ON ACTION sync
       CALL sync()
@@ -215,7 +218,6 @@ LABEL do_compile:
       IF isNewFile() THEN
         GOTO dosaveas
       END IF
-      --LET src=update()
       IF NOT file_write(m_srcfile) THEN
         CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
       ELSE
@@ -230,7 +232,6 @@ LABEL dosaveas:
           CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",saveasfile),IMG_ERROR)
         ELSE
           LET tmpname=setCurrFile(saveasfile,tmpname)
-          --LET src_copy=src
           CALL savelines()
           CALL mysetTitle()
           CALL display_full(TRUE,TRUE)
@@ -238,24 +239,82 @@ LABEL dosaveas:
       END IF
   END INPUT
   CALL delete_tmpfiles(tmpname) 
-  --CALL close_sc_window()
   RETURN 0
 END FUNCTION
 
-FUNCTION is4GLOrPer(fname)
+FUNCTION is4GLFile(fname)
   DEFINE fname STRING
-  RETURN os.Path.extension(fname)=="4gl" OR os.Path.extension(fname)=="per" 
+  RETURN os.Path.extension(fname)=="4gl"
+END FUNCTION
+
+FUNCTION isPERFile(fname)
+  DEFINE fname STRING
+  RETURN os.Path.extension(fname)=="per"
+END FUNCTION
+
+FUNCTION is4GLOrPerFile(fname)
+  DEFINE fname STRING
+  RETURN is4GLFile(fname) OR isPERFile(fname) 
 END FUNCTION
 
 FUNCTION compileTmp(tmpname,jump_to_error)
   DEFINE tmpname,compmess STRING
   DEFINE jump_to_error BOOLEAN
-  IF is4GLORPer(tmpname) THEN
+  IF is4GLOrPerFile(tmpname) THEN
     LET compmess = saveAndCompile(tmpname,jump_to_error)
     IF compmess IS NULL THEN
       CALL mymessage("Compile ok")
     END IF
   END IF
+END FUNCTION
+
+FUNCTION runprog(tmpname)
+  DEFINE tmpname STRING
+  DEFINE srcname,cmdir,cmd,info,ts,tmp42f,tmp42fLast,real42f,tmp42m STRING
+  DEFINE code INT
+  DEFINE t TEXT
+  IF (m_lastCompiledPER==tmpname) THEN --need to cp the tmp 42f fo the real 42f
+    LET tmp42f=tmpname.subString(1,tmpname.getLength()-4),".42f"
+    LET tmp42fLast=os.Path.baseName(tmp42f)
+    LET real42f=os.Path.join(os.Path.dirName(tmp42f),tmp42fLast.subString(3,tmp42fLast.getLength()))
+    DISPLAY "tmp42f:",tmp42f,",real42f:",real42f
+    CALL os.Path.copy(tmp42f,real42f) RETURNING code
+  END IF
+  LET srcname=m_lastCompiled4GL
+  LET tmp42m=srcname.subString(1,srcname.getLength()-4)
+  LET cmdir=os.Path.dirname(arg_val(0))
+  LET cmd=os.Path.join(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.txt 2>&1"
+  RUN cmd RETURNING code
+  LET info=sfmt("Returned code:%1\n",code)
+  LOCATE t IN FILE "result.txt"
+  LET ts=t
+  LET info=info,ts
+  OPEN WINDOW output WITH FORM "fglcm_output"
+  DISPLAY info TO info
+  MENU 
+    ON ACTION cancel ATTRIBUTE(TEXT="Close")
+      EXIT MENU
+  END MENU
+  CLOSE WINDOW output
+END FUNCTION
+
+FUNCTION preview_form()
+  DEFINE tmp42f STRING
+  LET tmp42f=m_lastCompiledPER
+  LET tmp42f=tmp42f.subString(1,tmp42f.getLength()-4),".42f"
+  CALL showform(tmp42f)
+END FUNCTION
+
+FUNCTION showform(ff)
+  DEFINE ff STRING
+  OPEN WINDOW sc AT 0,0 WITH 25 ROWS, 60 COLUMNS ATTRIBUTES(STYLE="preview")
+  OPEN FORM theform FROM ff
+  DISPLAY FORM theform
+  MENU "Preview"
+    ON ACTION myclose ATTRIBUTE(TEXT="Close (Escape)",ACCELERATOR="Escape")
+      EXIT MENU
+  END MENU
+  CLOSE WINDOW sc
 END FUNCTION
 
 FUNCTION mymessage(msg)
@@ -269,7 +328,7 @@ FUNCTION mymessage(msg)
 END FUNCTION
 
 FUNCTION update()
-  DEFINE newVal,cm STRING
+  DEFINE newVal STRING
   DEFINE cmRec CmType
   --LET newVal=fgl_dialog_getbuffer()
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getData"],[newVal])
@@ -294,9 +353,9 @@ FUNCTION sync() --called if the webco fired an action
 END FUNCTION
 
 FUNCTION syncInt(newVal)
-  DEFINE newVal,line,src STRING
+  DEFINE newVal,line STRING
   DEFINE orgnum,idx,i,j,z,len,insertpos INT
-  DEFINE crc BIGINT
+  --DEFINE crc BIGINT
   DEFINE cmRec CmType
   DISPLAY "newVal:",newVal
   IF newVal IS NULL THEN
@@ -364,7 +423,7 @@ FUNCTION syncInt(newVal)
   IF m_orglines.getLength()<>cmRec.lineCount THEN
     CALL err(SFMT("linecount local %1 != linecount remote %2",m_orglines.getLength(),cmRec.lineCount))
   END IF
-  {
+  { --we do not use the internal crc: its too slow !
   LET src=arr2String()
   LET crc=crc32(src)
   IF crc<>cmRec.crc THEN
@@ -447,7 +506,6 @@ END FUNCTION
 FUNCTION jump_to_line(linenum,col,line2,col2,initialize,flush)
   DEFINE linenum,col,line2,col2 INT
   DEFINE initialize,flush BOOLEAN
-  DEFINE cm STRING
   CALL initialize_when(initialize)
   LET m_cmRec.cursor1.line=line2cm(linenum)
   LET m_cmRec.cursor1.ch=line2cm(col)
@@ -463,14 +521,25 @@ FUNCTION display_full(initialize,flush)
   LET m_cmRec.full=arr2String()
   LET ext=os.Path.extension(m_srcfile)
   LET basename=os.Path.baseName(m_srcfile)
-  DISPLAY "display_full:",m_srcfile,",ext:",ext,",basename:",basename
   CASE 
     WHEN ext.getLength()>0 
       LET m_cmRec.extension=ext
     WHEN basename.toLowerCase()=="makefile"
       LET m_cmRec.extension="makefile"
+    WHEN m_IsNewFile
+      LET m_cmRec.extension=m_NewFileExt
   END CASE
+  DISPLAY "display_full:",m_srcfile,",ext:",m_cmRec.extension,",basename:",basename
   CALL flush_when(flush)
+  LET m_lastCRC=NULL
+END FUNCTION
+
+FUNCTION setActionActive(name,active)
+  DEFINE name STRING
+  DEFINE active BOOLEAN
+  DEFINE d ui.Dialog
+  LET d=ui.Dialog.getCurrent()
+  CALL d.setActionActive(name,active)
 END FUNCTION
 
 FUNCTION compile_and_process(fname,jump_to_error)
@@ -499,13 +568,13 @@ END FUNCTION
 
 FUNCTION compile_source(fname,proposals)
   DEFINE fname STRING
-  DEFINE showmessage INT
   DEFINE proposals INT
-  DEFINE dirname,cmd,mess,cparam,firstErrLine,line,srcname,compOrForm STRING
-  DEFINE code,i,atidx INT
+  DEFINE dirname,cmd,cmd1,mess,cparam,firstErrLine,line,srcname,compOrForm,tmpName STRING
+  DEFINE result STRING
+  DEFINE code,i,atidx,dummy INT
   DEFINE isPER BOOLEAN
   LET dirname=file_get_dirname(fname)
-  LET isPER=os.Path.extension(fname)=="per"
+  LET isPER=isPERFile(fname)
   IF isPER THEN
     LET cparam="-c"
   END IF
@@ -519,9 +588,9 @@ FUNCTION compile_source(fname,proposals)
   END IF
   LET compOrForm=IIF(isPER,"fglform","fglcomp")
   IF file_on_windows() THEN
-    LET cmd=sfmt("set FGLDBPATH=%1;%%FGLDBPATH%% && %2 %3 -M %4 2>&1",dirname,compOrForm,cparam,fname)
+    LET cmd=sfmt("set FGLDBPATH=%1;%%FGLDBPATH%% && %2 %3 -M -Wall %4 2>",dirname,compOrForm,cparam,fname)
   ELSE
-    LET cmd=sfmt("export FGLDBPATH=\"%1\":$FGLDBPATH && %2 %3 -M \"%4\" 2>&1",dirname,compOrForm,cparam,fname)
+    LET cmd=sfmt("export FGLDBPATH=\"%1\":$FGLDBPATH && %2 %3 -M -Wall \"%4\" 2>",dirname,compOrForm,cparam,fname)
   END IF
   CALL compile_arr.clear()
   --DISPLAY "cmd=",cmd
@@ -529,10 +598,27 @@ FUNCTION compile_source(fname,proposals)
     --DISPLAY "cmd=",cmd
   END IF
   IF NOT proposals THEN
-    RUN cmd RETURNING code 
+    LET tmpName=os.Path.makeTempName()
+    LET cmd1=cmd,tmpName
+    RUN cmd1 RETURNING code 
+    IF isPER THEN
+      CALL setActionActive("preview",code==0)
+      LET m_lastCompiledPER=IIF(code==0,fname,NULL)
+    ELSE
+      CALL setActionActive("run",code==0)
+      LET m_lastCompiled4GL=IIF(code==0,fname,NULL)
+    END IF
+    IF NOT code AND os.Path.size(tmpName) > 0 THEN
+      LET code=400 --warnings occured
+    END IF
   END IF
   IF code OR proposals THEN
-    CALL file_get_output(cmd,compile_arr)
+    IF proposals THEN
+      LET cmd=cmd,"&1"
+      CALL file_get_output(cmd,compile_arr)
+    ELSE
+      CALL file_read_in_arr(tmpName,compile_arr)
+    END IF
     IF (atidx:=fname.getIndexOf(".@",1))>0 THEN
       LET srcname=fname.subString(1,atidx-1),fname.subString(atidx+2,fname.getLength())
     ELSE
@@ -549,9 +635,13 @@ FUNCTION compile_source(fname,proposals)
       END IF
       LET mess=mess,compile_arr[i],"\n"
     END FOR
-    RETURN mess
+    LET result=mess
   END IF
-  RETURN ""
+  IF tmpName IS NOT NULL THEN
+    DISPLAY "delete tmpName:",tmpName
+    CALL os.Path.delete(tmpName) RETURNING dummy
+  END IF
+  RETURN result
 END FUNCTION
 
 --calls the form compiler in completion mode
@@ -652,6 +742,10 @@ FUNCTION my_write(fname)
     CALL fgl_winmessage(S_ERROR,sfmt("Can't write to:%1",fname),IMG_ERROR)
     RETURN FALSE
   END IF
+  IF fname == m_srcfile THEN
+    LET m_IsNewFile=FALSE
+    LET m_NewFileExt=NULL
+  END IF
   DISPLAY "did write to:",fname
   RETURN TRUE
 END FUNCTION
@@ -662,8 +756,9 @@ FUNCTION process_compile_errors(jump_to_error)
   DEFINE jump_to_error INT
   DEFINE idx,erridx INT
   DEFINE first BOOLEAN
-  DEFINE firstcolon,secondcolon,thirdcolon,fourthcolon,fifthcolon,linenum,c,start INT
+  DEFINE firstcolon,secondcolon,thirdcolon,fourthcolon,fifthcolon,linenum,start INT
   DEFINE line,col,col2,linenumstr,line2numstr STRING
+  DEFINE isError BOOLEAN
   LET idx=1
   LET m_error_line=""
   IF idx>compile_arr.getLength() OR idx<1 THEN
@@ -677,7 +772,8 @@ FUNCTION process_compile_errors(jump_to_error)
       --exclude drive letters under windows
       LET start=3
     END IF
-    IF (firstcolon:=line.getIndexOf(":",start))>0 AND line.getIndexOf(":error:",1)<>0 THEN
+    IF (firstcolon:=line.getIndexOf(":",start))>0 AND 
+      ( (isError:=(line.getIndexOf(":error:",1)<>0)==TRUE) OR line.getIndexOf(":warning:",1)<>0 ) THEN
       LET secondcolon=line.getIndexOf(":",firstcolon+1)
       LET thirdcolon=line.getIndexOf(":",secondcolon+1)
       LET fourthcolon=line.getIndexOf(":",thirdcolon+1)
@@ -706,7 +802,7 @@ FUNCTION process_compile_errors(jump_to_error)
           LET m_cmRec.annotations[erridx].to.line=line2cm(line2numstr)
           LET m_cmRec.annotations[erridx].to.ch=col2
           LET m_cmRec.annotations[erridx].message=m_error_line
-          LET m_cmRec.annotations[erridx].severity="error"
+          LET m_cmRec.annotations[erridx].severity=IIF(isError,"error","warning")
           IF jump_to_error THEN
             CALL jump_to_line(linenum,col,line2numstr,col2,FALSE,FALSE)
             LET jump_to_error=FALSE
@@ -752,6 +848,28 @@ FUNCTION file_read(srcfile)
   RETURN TRUE
 END FUNCTION
 
+FUNCTION file_read_in_arr(txtfile,arr)
+  DEFINE txtfile STRING
+  DEFINE arr DYNAMIC ARRAY OF STRING
+  DEFINE line STRING
+  DEFINE ch base.Channel
+  LET  ch=base.channel.create()
+  CALL arr.clear()
+  TRY
+  CALL ch.openFile(txtfile,"r")
+  IF status == 0 THEN
+    WHILE NOT ch.isEof()
+      LET line=ch.readLine()
+      LET arr[arr.getLength()+1]=line
+    END WHILE
+    CALL ch.close()
+  END IF
+  --DISPLAY "m_orglines:",util.JSON.stringify(m_orglines),",len:",m_orglines.getLength()
+  CATCH
+    DISPLAY err_get(status)
+  END TRY
+END FUNCTION
+
 FUNCTION arr2String()
   DEFINE buf base.StringBuffer
   DEFINE result STRING
@@ -787,7 +905,7 @@ FUNCTION file_write_int(srcfile,mode)
   DEFINE mode STRING
   DEFINE ch base.Channel
   DEFINE result,mystatus INT
-  DEFINE idx,old,len INT
+  DEFINE idx,len INT
   DEFINE line STRING
   LET  ch=base.channel.create()
   CALL ch.setDelimiter("")
@@ -818,7 +936,7 @@ END FUNCTION
 
 FUNCTION file_write(srcfile)
   DEFINE srcfile STRING
-  DEFINE start,t DATETIME YEAR TO FRACTION(2)
+  DEFINE start DATETIME YEAR TO FRACTION(2)
   DEFINE result INT
   LET start=CURRENT
   LET result=file_write_int(srcfile,"w")
@@ -860,7 +978,6 @@ FUNCTION file_on_windows()
 END FUNCTION
 
 FUNCTION _file_uname()
-  DEFINE dummy INT
   DEFINE arr DYNAMIC ARRAY OF STRING
   IF file_on_windows() THEN RETURN "Windows" END IF
   CALL file_get_output("uname",arr)
@@ -893,11 +1010,11 @@ FUNCTION checkFileSave()
   DEFINE ans STRING
   DEFINE dummy INT
   IF checkChangedArray() THEN
-    IF (ans:=fgl_winquestion("fglped",sfmt("Save changes to %1?",m_title),"yes","yes|no|cancel","question",0))="yes" THEN
+    IF (ans:=fgl_winquestion("fglcm",sfmt("Save changes to %1?",m_title),"yes","yes|no|cancel","question",0))="yes" THEN
       IF isNewFile() THEN
         LET m_srcfile=fglped_saveasdlg(m_srcfile)
         IF m_srcfile IS NULL THEN
-          RETURN "cancel"
+          RETURN S_CANCEL
         END IF
       END IF
       CALL my_write(m_srcfile) RETURNING dummy
@@ -906,11 +1023,38 @@ FUNCTION checkFileSave()
   RETURN ans
 END FUNCTION
 
-FUNCTION file_new()
+FUNCTION file_new(ext)
+  DEFINE ext STRING
+  DEFINE cancel BOOLEAN
+  IF ext IS NULL THEN
+    OPEN WINDOW file_new WITH FORM "fglcm_filenew" ATTRIBUTE(TEXT="Please choose a File type")
+    MENU 
+     ON ACTION b4gl ATTRIBUTE(ACCELERATOR="g")
+       LET ext="4gl" 
+       EXIT MENU
+     ON ACTION bper ATTRIBUTE(ACCELERATOR="f")
+       LET ext="per" 
+       EXIT MENU
+     ON ACTION b4st ATTRIBUTE(ACCELERATOR="s")
+       LET ext="4st" 
+       EXIT MENU
+     ON ACTION cancel 
+       LET cancel=TRUE 
+       EXIT MENU
+    END MENU   
+    CLOSE WINDOW file_new
+    IF cancel THEN
+      RETURN S_CANCEL
+    END IF
+  END IF
   CALL m_orglines.clear()
   LET m_orglines[1].line=" " CLIPPED
   LET m_orglines[1].orgnum=1
+  LET m_IsNewFile = TRUE
+  LET m_NewFileExt=ext
   CALL savelines()
+  CALL fgl_winMessage("fglcm",sfmt("ext is:%1",ext),"info")
+  RETURN ext
 END FUNCTION
 
 FUNCTION setCurrFile(fname,tmpname) --sets m_srcfile
@@ -927,16 +1071,12 @@ FUNCTION getTmpFileName(fname)
   DEFINE fname STRING
   DEFINE tmpname STRING
   DEFINE dir,shortname STRING
-  DEFINE ext STRING
-  LET ext=os.Path.extension(fname)
   IF fname IS NULL THEN
-    --LET tmpname=".@__empty__.",ext
-    LET tmpname=".@__empty__.4gl"
+    LET tmpname=".@__empty__.",m_NewFileExt
   ELSE
     LET dir=file_get_dirname(fname)
     LET shortname=os.Path.basename(fname)
     LET tmpname=os.Path.join(dir,sfmt(".@%1",shortname))
-    --LET tmpname=cut_extension(tmpname),ext
   END IF
   RETURN tmpname
 END FUNCTION
@@ -944,12 +1084,7 @@ END FUNCTION
 --returns true if the current contents was initialized by File->New
 --or File->New From Wizard
 FUNCTION isNewFile()
-  IF m_srcfile IS NULL 
-    --OR os.Path.baseName(m_srcfile)=WIZGEN 
-    THEN
-    RETURN 1
-  END IF
-  RETURN 0
+  RETURN (m_srcfile IS NULL)  OR m_IsNewFile
 END FUNCTION
 
 FUNCTION delete_tmpfiles(tmpname)
@@ -973,7 +1108,7 @@ FUNCTION mysetTitle()
   ELSE
     LET m_title=os.Path.baseName(m_srcfile)
   END IF
-  CALL fgl_setTitle(sfmt("%1 - fglped",m_title))
+  CALL fgl_setTitle(sfmt("%1 - fglcm",m_title))
 END FUNCTION
 
 FUNCTION fglped_saveasdlg(fname)
@@ -1048,7 +1183,7 @@ END FUNCTION
 
 FUNCTION crc32int(str)
   DEFINE str,ch STRING
-  DEFINE crc,len,i,code,idx,mask32,res,highbit INT
+  DEFINE crc,len,i,code,idx,res INT
   DEFINE big BIGINT
   LET crc=-1
   LET len=str.getLength()
