@@ -24,7 +24,7 @@ if [ -z "$FGLVIM" ] ; then
   echo "can't find $1.vim"
   exit 1
 fi
-cat $FGLVIM | sed -n '/^syn keyword/p' | awk 'BEGIN {start=1;print("var keywords=\{");} { if (start==1) { start=0;printf("\"%s\":true\n",$4);} else { printf(",\"%s\":true\n",$4);}} END {print("}//keywords\n");}' > keywords.js
+cat $FGLVIM | sed -n '/^syn keyword/p' | awk 'BEGIN {start=1;print("var keywords={");} { if (start==1) { start=0;printf("\"%s\":true\n",$4);} else { printf(",\"%s\":true\n",$4);}} END {print("}//keywords\n");}' > keywords.js
 if [ $? -ne 0 ] ; then
   echo "can't get keywords"
   exit 1
