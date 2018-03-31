@@ -1,0 +1,9 @@
+MAIN
+  OPEN FORM f FROM "main"
+  DISPLAY FORM f
+  MENU "Hello"
+    COMMAND "Exit"
+      EXIT MENU
+  END MENU
+  DISPLAY "bar"
+END MAIN

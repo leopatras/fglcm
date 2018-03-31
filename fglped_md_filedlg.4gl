@@ -246,7 +246,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
   CALL ui.Dialog.setDefaultUnbuffered(TRUE)
   OPTIONS FIELD ORDER CONSTRAINED
   OPTIONS INPUT WRAP
-  DIALOG 
+  DIALOG ATTRIBUTE (UNBUFFERED)
     DISPLAY ARRAY _filedlg_list TO sr.* 
       BEFORE ROW 
         LET filename=update_row(arr_curr(),filename)
@@ -274,6 +274,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
       DISPLAY "File:" TO lfn
       IF dlgtype=C_SAVE THEN
         CALL form.setElementText("accept","Save")
+        DISPLAY "Save as file:" TO lfn
       END IF
       IF r.opt_choose_directory THEN
         DISPLAY "Directory:" TO lfn
@@ -306,6 +307,7 @@ FUNCTION _filedlg_doDlg(dlgtype,title,r)
           LET filename=update_row(arr_curr(),filename)
         ELSE
           LET filename=""
+          CALL fgl_dialog_setcursor(1)
         END IF
       WHEN file_exists(filepath) AND os.Path.isFile(filepath)
         GOTO doaccept
@@ -333,7 +335,8 @@ LABEL doaccept:
       END IF
       IF r.opt_root_dir IS NOT NULL THEN --check the resulting file
         LET full=os.Path.fullPath(filePath)
-        IF os.Path.isFile(full) OR os.Path.isLink(full) THEN
+        IF (os.Path.isFile(full) OR os.Path.isLink(full)) OR
+          (dlgtype==C_SAVE AND NOT os.Path.exists(full)) THEN
           LET full=os.Path.dirname(full)
         END IF
         IF NOT isInsideDirectoryParent(full,m_r.opt_root_dir) THEN
@@ -351,6 +354,7 @@ LABEL doaccept:
           CALL _filedlg_fetch_filenames(DIALOG,filepath,ftype,"..")
           DISPLAY BY NAME currpath
           LET filename=""
+          CALL fgl_dialog_setcursor(1)
           LET doContinue=1
         ELSE
           LET filepath=currpath
@@ -370,6 +374,11 @@ LABEL doaccept:
         IF NOT file_exists(dirname) THEN
           CALL _filedlg_mbox_ok("Error", SFMT(%"directory '%1' does not exist!",filepath), "stop")
           LET doContinue=1
+        END IF
+        IF file_exists(filepath) THEN
+          IF NOT _filedlg_mbox_yn("Warning",sfmt("File '%1' already exists, do you want to replace it ?",filename),"question") THEN
+            LET doContinue=1
+          END IF
         END IF
       END IF
       IF NOT doContinue THEN
@@ -592,7 +601,7 @@ FUNCTION _getClientIP()
 END FUNCTION
 
 FUNCTION _isLocal()
-  DEFINE ip,fename STRING
+  --DEFINE ip,fename STRING
   {
   LET fename=ui.Interface.getFrontEndName()
   IF (fename = "GDC" OR fename="Genero Desktop Client") THEN

@@ -17,4 +17,6 @@ FGLCMDIR=`dirname $SCRIPT_NAME`
 #we recompile everything always: hence avoid version clashes
 make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLCMDIR
+export FGLRESOUREPATH=$FGLCMDIR:$FGLRESOURPATH
+export DBPATH=$FGLCMDIR:$DBPATH
 exec $FGLCMDIR/fglwebrun/fglwebrun $FGLCMDIR/cm.42m "$@" 

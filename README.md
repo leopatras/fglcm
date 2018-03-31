@@ -11,7 +11,7 @@ It uses the codemirror editor javascript component to provide a decent editing e
 As a side effect it works in GDC too.
 
 # Prerequisites
-Gnu Make, nodejs and npm
+Gnu Make, nodejs and npm, under Linux a C-compiler is required
 
 Call
 ```
@@ -22,7 +22,15 @@ simply call
 ```
 $ ./cm demo/foo.4gl
 ```
-to edit a sample file.
+to edit a sample file with GDC.
+
+Call
+```
+$ ./cmweb demo/foo.4gl
+```
+to edit a sample file in the browser.
+(The GAS needs to be installed and FGLASDIR needs to be set)
+Opening a .per file shows the live form preview right hand side.
 
 # Installation
 
@@ -34,7 +42,12 @@ $ <path_to_this_repository>/cm <your source file>
 and it uses the fglcomp/fglrun in your PATH to compile and run fglcm.
 Of course you can add also <path_to_this_repository> in your PATH .
 
-# TODO
+# fglfiddle mode
 
-Implement syntax highlighting and live preview of .per files.
-
+Set the environment variable *FGLFIDDLE* to enable the fiddle mode.
+```
+$ FGLFIDDLE=1 ./cm main.4gl
+```
+to let fglcm run in fiddle mode.
+It has a main.4gl and a main.per file by default,
+and shows a special toolbar to allow rapid switching between those 2 files.

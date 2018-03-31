@@ -5,6 +5,12 @@
      <StyleAttribute name="actionPanelPosition" value="none" />
      <StyleAttribute name="ringMenuPosition"    value="none" />
   </Style>
+  <Style name="Window.cm">
+     <StyleAttribute name="windowType" value="normal" />
+     <StyleAttribute name="actionPanelPosition" value="none" />
+     <StyleAttribute name="ringMenuPosition"    value="none" />
+     <StyleAttribute name="statusBarType"       value="none" />
+  </Style>  
   <Style name="Window.preview">
      <StyleAttribute name="actionPanelPosition" value="right" />
      <StyleAttribute name="ringMenuPosition"    value="right" />
@@ -40,6 +46,14 @@
      <StyleAttribute name="ringMenuPosition" value="none" />
      <StyleAttribute name="toolBarPosition" value="none" />
      <StyleAttribute name="forceDefaultSettings" value="yes" />
+  </Style>
+  <Style name="Window.dialog4">
+     <StyleAttribute name="windowType" value="modal" />
+     <StyleAttribute name="sizable" value="yes" />
+     <StyleAttribute name="actionPanelPosition" value="bottom" />
+     <StyleAttribute name="ringMenuPosition" value="none" />
+     <StyleAttribute name="statusBarType" value="none" />
+     <StyleAttribute name="errorMessagePosition" value="popup" />
   </Style>
   <Style name=".scale">
      <StyleAttribute name="scaleIcon" value="yes" />

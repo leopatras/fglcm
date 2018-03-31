@@ -13,6 +13,7 @@ try {
   }
 }
 
+var m_instance=0;
 var m_inSetValue=false;
 //var m_state=null;
 var m_proparr=[];
@@ -28,8 +29,10 @@ var m_crcTable=[];
 var e_states = { initial:"initial",modified:"modified", inserted:"inserted" };
 var m_annotations=[];
 var m_editor=null;
+var m_editorId=null;
 var m_dataPending=false;
 var m_updateOnData=null;
+var m_prevFocus=null;
 
 function initCRCTable(){
   var c;
@@ -92,11 +95,7 @@ function toUtf8ByteArray(str) {
   return out;
 }
 
-function setEditorValue(editor,txt) {
-  m_inSetValue=true;
-  editor.setValue(txt);
-  m_inSetValue=false;
-  var doc=editor.getDoc();
+function initLines(doc) {
   var cnt=doc.lineCount();
   m_lines=[];
   for (var i=0;i<cnt;i++) {
@@ -106,6 +105,13 @@ function setEditorValue(editor,txt) {
     }
   }
   m_initialLineCount=cnt;
+}
+
+function setEditorValue(editor,txt) {
+  m_inSetValue=true;
+  editor.setValue(txt);
+  m_inSetValue=false;
+  initLines(editor.getDoc());
 }
 
 function coalesceIntArr(arr) {
@@ -189,7 +195,8 @@ function sync() {
       inserts:inserts,
       cursor1:editor.getCursor(true),
       cursor2:editor.getCursor(false),
-      vm: false
+      vm: false,
+      locationhref: window.location.href
     }
     renumberLines();
     m_removed=[];
@@ -418,26 +425,48 @@ function fIs4GLOrPer(ext) {
 function createEditor(ext) {
    var ed=null;
    if (m_editor) {
-     ed=document.getElementById("editor");
+     m_editor.toTextArea();
+     ed=document.getElementById(m_editorId);
      ed.parentNode.removeChild(ed);
    }
    ed=document.createElement("TEXTAREA"); 
-   ed.id="editor";
+   m_instance++;
+   m_editorId="editor"+m_instance;
+   ed.id=m_editorId;
    document.body.appendChild(ed);
    var lint=true;
-   var extraKeys={};
+   //those keys are mostly for GBC because it can't handle them
+   //via the TopMenu accelerators
+   var extraKeys={
+          "Alt-C":function(cm) {
+            sendChange(cm,"new_cm",false);
+            return false;
+          },
+          "Alt-O":function(cm) {
+            sendChange(cm,"open_cm",false);
+            return false;
+          },
+          "Alt-S":function(cm) {
+            sendChange(cm,"save_cm",false);
+            return false;
+          },
+          "Alt-Q":function(cm) {
+            sendChange(cm,"close_cm",false);
+            return false;
+          },
+          "Cmd-F":function(cm) {
+            CodeMirror.commands.findPersistent(cm);
+            return false;
+          },
+          "Alt-Cmd-F":function(cm) {
+            CodeMirror.commands.replace(cm);
+            return false;
+          }
+   };
    var is4GLOrPer=fIs4GLOrPer(ext);
    if (is4GLOrPer) {
      lint = { 'getAnnotations': myAnnotations, 'lintOnChange': false };
-     extraKeys = {
-          /*
-          "Cmd-S":function(cm) {
-            sendChange(cm,"sync",false);
-            return false;
-          }
-          ,
-          */
-          "Tab":function(cm) {
+     extraKeys["Tab"] = function(cm) {
             //m_state="complete";
             if (m_dataPending) {
               console.log("Tab seen,data pending in completion");
@@ -447,17 +476,19 @@ function createEditor(ext) {
               sendChange(cm,"complete",false);
             }
             return false;
-          } 
-        };
+       };
    }
    if (ext=="js") {
-      extraKeys =  {"Tab": "autocomplete"};
+      extraKeys["Tab"] = "autocomplete";
    }
    var modemap = {
      "4gl"    : "4gl",
      "js"     : "javascript",
      "42f"    : "xml",
      "fgldeb" : "xml",
+     "4tb"    : "xml",
+     "4tm"    : "xml",
+     "4sm"    : "xml",
      "4st"    : "xml"
    }
    var mode=modemap[ext];
@@ -480,10 +511,12 @@ function createEditor(ext) {
         showCursorWhenSelecting: true,
         extraKeys: extraKeys
   });
+  var doc=new CodeMirror.Doc("", mode );
   m_editor.EXTENSION=ext; //just glue our 4GL side extension var to the editor
   m_editor.setOption("fullScreen",true);
   m_editor.on("change",onChange);
   reset(m_editor);
+  //m_editor.focus();
 }
 createEditor("4gl");
 //editor.on("keyHandled",onKeyHandled);
@@ -504,12 +537,14 @@ function get4GLHint(cm, c) {
    var re_noalnum=/^["'\^%\*\-\+,= \\/\.\[\](){};]+$/;
    var isAlNum=true;
    if (txt.length>=1 && re_noalnum.test(txt)) {
-     var nextCursor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
-     txt=cm.getRange(cursor, nextCursor);
-     console.log("word is not noalnum");
-     isAlNum=false;
-     word.head=cursor;
-     word.anchor=cursor;
+     if (word.anchor.ch<cursor.ch) {
+       //var nextCursor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
+       //txt=cm.getRange(cursor, nextCursor);
+       console.log("word is noalnum");
+       isAlNum=false;
+       word.head=cursor;
+       word.anchor=cursor;
+     }
    }
    console.log("txt:'"+txt+"'");
    var foundeq=false;
@@ -567,7 +602,10 @@ function clearUpdateTimer() {
 
 onICHostReady = function(version) {
    //console.log("onICHostReady");
-   gICAPI.onFocus = function(polarity) {
+   gICAPI.onFocus = function(setFocus) {
+     if (setFocus&&m_editor) {
+       m_editor.focus();
+     }
    }
    gICAPI.onData = function(data) {
      //alert("onData:"+data);
@@ -600,7 +638,13 @@ onICHostReady = function(version) {
      }
      //alert("data:"+data);
      if (o.full!==undefined) {
-       if (o.full!==m_editor.getValue()) {
+       if (o.fileName!==undefined && o.fileName!=m_editor.FILENAME) {
+         console.log("would swap doc");
+         var doc=new CodeMirror.Doc(o.full,m_editor.getMode());
+         m_editor.swapDoc(doc);
+         m_editor.FILENAME=o.fileName;
+         initLines(doc);
+       } else if (o.full!==m_editor.getValue()) {
          setEditorValue(m_editor,o.full);
        }
      }
@@ -618,19 +662,31 @@ onICHostReady = function(version) {
        m_annotations=[];
        m_editor.performLint();
      }
+     if (o.cmCommand=="find") {
+       CodeMirror.commands.findPersistent(m_editor);
+     } else if (o.cmCommand=="replace") {
+       CodeMirror.commands.replace(m_editor);
+     }
      checkUpdateOnData();
+     //m_editor.focus();
    }
 
    gICAPI.onProperty = function(p) {
-     var o = eval('(' + p + ')');
-     console.log(JSON.stringify(o));
+     //var o = eval('(' + p + ')');
+     //console.log(JSON.stringify(o));
    }
 }
-
+/*
 function tryMarkers() {
   m_annotations=[ { from: new CodeMirror.Pos(1,0),to: new CodeMirror.Pos(1,2), severity: "error",message:"@blaba" } ];
   //window.updateMarkers(m_editor,annotations);
   m_editor.performLint();
 }
-
+setInterval(function(){ 
+  var e=document.activeElement;
+  if (e) {
+    console.log("focus:"+e.tagName+",id:"+e.id+",className:"+e.className);
+  }
+}, 1000);
+*/
 //reset(m_editor);

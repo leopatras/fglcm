@@ -7,7 +7,7 @@ IMPORT FGL fglped_fileutils
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
-CONSTANT S_CANCEL="cancel"
+CONSTANT S_CANCEL="*cancel*"
 
 TYPE proparr_t DYNAMIC ARRAY OF STRING
 DEFINE m_error_line STRING
@@ -20,11 +20,16 @@ DEFINE m_CRCTable ARRAY[256] OF INTEGER
 DEFINE m_lastCRC BIGINT
 DEFINE m_modified BOOLEAN
 DEFINE m_IsNewFile BOOLEAN
+DEFINE m_mainFormOpen BOOLEAN
+DEFINE m_previewHidden BOOLEAN
 DEFINE m_NewFileExt STRING
 DEFINE m_cmdIdx INT
 DEFINE m_lastCompiled4GL STRING
 DEFINE m_lastCompiledPER STRING
+DEFINE m_locationhref STRING
+DEFINE m_extURL STRING --external form viewer URL
 DEFINE _on_mac STRING --cache the file_on_mac
+DEFINE m_IsFiddle BOOLEAN
 CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
@@ -66,6 +71,9 @@ TYPE CmType RECORD
     vm BOOLEAN,  --we set this to true whenever 4GL wants to change values
     cmdIdx INT, --force reload
     extension STRING, --extension of or source file
+    cmCommand STRING, --editor command to perform in CodeMirror
+    fileName STRING, --the server side file name
+    locationhref STRING, --the server side location
     annotations DYNAMIC ARRAY OF RECORD --pass errors and warnings
       from RECORD 
         line INT,
@@ -85,10 +93,14 @@ DEFINE m_cm STRING
 
 MAIN
   DEFINE result INT
+  DEFER INTERRUPT
+  --RUN "env | sort"
+  LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
+  --LET m_IsFiddle=TRUE
   CALL ui.Interface.loadStyles("fglcm")
   --CALL initCRC32Table()
   LET m_lastCRC=NULL
-  LET m_CRCProg=os.Path.fullPath(os.Path.join(os.Path.dirname(arg_val(0)),"crc32"))
+  LET m_CRCProg=os.Path.fullPath(myjoin(mydir(arg_val(0)),"crc32"))
   DISPLAY "m_CRCProg:",m_CRCProg
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg=NULL
@@ -97,14 +109,111 @@ MAIN
   EXIT PROGRAM result
 END MAIN
 
+FUNCTION checkFiddleBar()
+  DEFINE f ui.Form
+  DEFINE fNode,tb om.DomNode
+  DEFINE nlist om.NodeList
+  IF m_IsFiddle THEN
+    RETURN
+  END IF
+  --remove the bar when not in fiddle mode
+  LET f=getCurrentForm()
+  LET fNode=f.getNode()
+  LET nlist=fNode.selectByTagName("ToolBar")
+  IF nlist.getLength()>0 THEN
+    LET tb=nlist.item(1)
+    CALL fNode.removeChild(tb)
+  END IF
+END FUNCTION
+
+FUNCTION mydir(path)
+  DEFINE path STRING
+  DEFINE dirname STRING
+  LET dirname=os.Path.dirname(path)
+  IF dirname IS NULL THEN
+    LET dirname="."
+  END IF
+  RETURN dirname
+END FUNCTION
+
+FUNCTION myjoin(path1,path2)
+  DEFINE path1,path2 STRING
+  RETURN os.Path.join(path1,path2)
+END FUNCTION
+
+FUNCTION isGBC()
+  RETURN ui.Interface.getFrontEndName()=="GBC"
+END FUNCTION
+
+FUNCTION getCurrentForm()
+  DEFINE w ui.Window
+  LET w=ui.Window.getCurrent()
+  RETURN w.getForm()
+END FUNCTION
+
+FUNCTION setPreviewActionActive(active)
+  DEFINE active BOOLEAN
+  DEFINE f ui.Form
+  DEFINE fNode,item om.DomNode
+  DEFINE nlist om.NodeList
+  CALL setActionActive("preview",active)
+  CALL setActionActive("showpreviewurl",active)
+  IF NOT m_IsFiddle THEN
+    RETURN
+  END IF
+  LET f=getCurrentForm()
+  LET fnode=f.getNode()
+  LET nlist=fnode.selectByPath('//ToolBarItem[@name="preview"]')
+  IF nlist.getLength()>0 THEN
+    LET item=nlist.item(1)
+    CALL f.setElementHidden("preview",NOT active)
+  END IF
+END FUNCTION
+
+FUNCTION hideOrShowPreview()
+  DEFINE f ui.Form
+  DEFINE isPER, wasHidden,dummy BOOLEAN
+  IF NOT isGBC() THEN
+    RETURN
+  END IF
+  LET f=getCurrentForm()
+  LET isPER=(m_IsNewFile AND ((m_NewFileExt IS NOT NULL) AND (m_NewFileExt=="per"))) OR isPERFile(m_srcfile)
+  DISPLAY sfmt("hideOrShow m_srcfile:%1,isPERFile:%2,isPER:%3,hidden:%4",
+     m_srcfile,isPERFile(m_srcfile),isPER,NOT isPER)
+  LET wasHidden=m_previewHidden
+  LET m_previewHidden=NOT isPER
+  CALL f.setFieldHidden("formonly.webpreview",m_previewHidden)
+  IF NOT wasHidden AND m_previewHidden THEN
+    CALL os.Path.delete(getSession42f()) RETURNING dummy
+    DISPLAY NULL TO webpreview
+  END IF  
+END FUNCTION
+
+FUNCTION checkMainFormOpen()
+  IF NOT isGBC() AND m_mainFormOpen THEN
+    RETURN
+  END IF
+  IF m_mainFormOpen THEN
+    CLOSE FORM f
+  END IF
+  --AND ((m_IsNewFile AND m_NewFileExt=="per") OR isPERFile(m_srcfile))
+  --IF isGBC() THEN
+  --  OPEN FORM f FROM "cm_webpreview"
+  --ELSE
+    OPEN FORM f FROM "cm"
+  --END IF
+  DISPLAY FORM f
+  LET m_mainFormOpen=TRUE
+  CALL checkFiddleBar()
+  CALL hideOrShowPreview()
+END FUNCTION
+
 --main INPUT to edit the form, everything is called from here
 FUNCTION edit_source(fname)
   DEFINE fname STRING
   DEFINE changed INTEGER
-  DEFINE jump_to_error BOOLEAN
-  DEFINE tmpname,ans,cname,saveasfile,dummy STRING
-  OPEN FORM f FROM "cm"
-  DISPLAY FORM f
+  DEFINE jump_to_error,modified BOOLEAN
+  DEFINE tmpname,ans,saveasfile,dummy STRING
   LET changed=1
   IF fname IS NULL THEN
     LET m_srcfile=NULL
@@ -114,7 +223,9 @@ FUNCTION edit_source(fname)
   ELSE
     LET m_srcfile=fname
     IF NOT file_read(m_srcfile) THEN
-      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),"yes","yes|no|cancel","question",0))=S_CANCEL THEN
+      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),
+          "yes","yes|no|cancel","question",0))=S_CANCEL 
+      THEN
         RETURN 1
       END IF
       IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
@@ -131,99 +242,141 @@ FUNCTION edit_source(fname)
   END IF
   LET tmpname=setCurrFile(m_srcfile,tmpname)
   CALL savelines()
+  CALL checkMainFormOpen()
   OPTIONS INPUT WRAP
   INPUT m_cm WITHOUT DEFAULTS FROM cm ATTRIBUTE(accept=FALSE,cancel=FALSE)
     BEFORE INPUT
       CALL DIALOG.setActionActive("run",FALSE)
-      CALL DIALOG.setActionActive("preview",FALSE)
+      CALL setPreviewActionActive(FALSE)
+      CALL DIALOG.setActionActive("main4gl",m_IsFiddle)
+      CALL DIALOG.setActionActive("mainper",m_IsFiddle)
+      CALL DIALOG.setActionHidden("main4gl",NOT m_IsFiddle)
+      CALL DIALOG.setActionHidden("mainper",NOT m_IsFiddle)
       CALL initialize_when(TRUE)
       CALL compileTmp(tmpname,TRUE)
       CALL display_full(FALSE,FALSE)
       CALL flush_cm()
+
     ON ACTION run
       CALL runprog(tmpname)
+
     ON ACTION preview
       CALL preview_form()
+
+    ON ACTION showpreviewurl
+      CALL show_previewurl()
+
+    ON ACTION close_cm ATTRIBUTE(DEFAULTVIEW=NO)
+      CALL sync()
+      GOTO action_close
     ON ACTION close
       CALL fcsync()
+LABEL action_close:
       IF checkFileSave()=S_CANCEL THEN
         CONTINUE INPUT
       ELSE
         EXIT INPUT
       END IF
+
     ON ACTION complete
       CALL sync() 
       IF NOT my_write(tmpname) THEN
         EXIT INPUT
       END IF
-      INITIALIZE m_cmRec.* TO NULL
+      CALL initialize_when(TRUE)
       LET m_cmRec.proparr=complete(tmpname)
       CALL compile_and_process(tmpname,FALSE) RETURNING dummy
       CALL flush_cm()
+
+    ON ACTION find
+      CALL fcsync()
+      CALL initialize_when(TRUE)
+      LET m_cmRec.cmCommand="find"
+      CALL compileTmp(tmpname,FALSE)
+      CALL flush_cm()
+      
+    ON ACTION replace
+      CALL fcsync()
+      CALL initialize_when(TRUE)
+      LET m_cmRec.cmCommand="replace"
+      CALL compileTmp(tmpname,FALSE)
+      CALL flush_cm()
+
+
     ON ACTION gotoline
       CALL fcsync()
       CALL do_gotoline()
-    ON ACTION update
+
+    ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
       CALL sync()
       LET jump_to_error=FALSE
       GOTO do_compile
-    ON ACTION compile
+    ON ACTION compile ATTRIBUTE(DEFAULTVIEW=NO)
       CALL fcsync()
       LET jump_to_error=TRUE
 LABEL do_compile:
       CALL initialize_when(TRUE)
       CALL compileTmp(tmpname,jump_to_error)
       CALL flush_cm()
+
+    ON ACTION new_cm ATTRIBUTE(DEFAULTVIEW=NO)
+      CALL sync()
+      GOTO action_new
     ON ACTION new
       CALL fcsync()
+LABEL action_new:
       IF (ans:=checkFileSave())=S_CANCEL THEN CONTINUE INPUT END IF
       CALL initialize_when(TRUE)
-      IF (file_new(NULL)==S_CANCEL) THEN CONTINUE INPUT END IF
+      IF file_new(NULL)==S_CANCEL THEN CONTINUE INPUT END IF
       CALL display_full(FALSE,FALSE)
       LET tmpname=setCurrFile("",tmpname)
+      CALL compileTmp(tmpname,FALSE)
+      CALL hideOrShowPreview()
       CALL flush_cm()
+
+    ON ACTION main4gl
+      CALL fcsync()
+      LET tmpname=doOpen(tmpname,"main.4gl")
+
+    ON ACTION mainper
+      CALL fcsync()
+      LET tmpname=doOpen(tmpname,"main.per")
+      
+    ON ACTION open_cm ATTRIBUTE(DEFAULTVIEW=NO)
+      CALL sync()
+      GOTO action_open
     ON ACTION open
       CALL fcsync()
-      IF (ans:=checkFileSave())=S_CANCEL THEN CONTINUE INPUT END IF
-      CALL initialize_when(TRUE)
-      IF ans="no" THEN 
-        CALL display_full(FALSE,FALSE)
-      END IF
-      CALL savelines()
-      LET cname = fglped_filedlg()
-      IF cname IS NOT NULL THEN
-        IF NOT file_read(cname) THEN
-          CALL restorelines()
-          CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
-          LET cname=NULL
-        ELSE
-          LET m_lastCRC=NULL
-          CALL savelines()
-          LET tmpname = setCurrFile(cname,tmpname)
-          CALL display_full(FALSE,FALSE)
-        END IF
-        IF NOT isPERFile(tmpname) THEN
-          CALL setActionActive("preview",FALSE)
-        END IF
-      ELSE
-        --CALL display_full()
-      END IF
-      CALL compileTmp(tmpname,cname IS NOT NULL)
-      CALL flush_cm()
-    ON ACTION sync
+LABEL action_open:
+      LET tmpname=doOpen(tmpname,NULL)
+
+    --ON ACTION sync
+    --  CALL sync()
+
+    ON ACTION save_cm ATTRIBUTE(DEFAULTVIEW=NO)
       CALL sync()
+      DISPLAY "save_cm"
+      GOTO action_save
     ON ACTION save
-      DISPLAY "save"
+      DISPLAY "save_topmenu"
       CALL fcsync()
+      LET modified=m_modified
+LABEL action_save:
       IF isNewFile() THEN
         GOTO dosaveas
       END IF
       IF NOT file_write(m_srcfile) THEN
         CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
+        --TODO: handle this worst case 
       ELSE
-        MESSAGE "saved:",m_srcfile
+        DISPLAY "saved"
         CALL savelines()
+        CALL initialize_when(TRUE)
+        CALL compileTmp(tmpname,FALSE)
+        CALL flush_cm()
+        CALL mymessage(sfmt("saved:%1",m_srcfile))
       END IF
+
     ON ACTION saveas
       DISPLAY "saveas"
 LABEL dosaveas:
@@ -233,13 +386,54 @@ LABEL dosaveas:
         ELSE
           LET tmpname=setCurrFile(saveasfile,tmpname)
           CALL savelines()
+          CALL resetNewFile()
           CALL mysetTitle()
           CALL display_full(TRUE,TRUE)
         END IF
       END IF
   END INPUT
-  CALL delete_tmpfiles(tmpname) 
+  CALL delete_tmpfiles(tmpname)
+  DISPLAY NULL TO webpreview
+  CALL os.Path.delete(getSession42f()) RETURNING dummy
   RETURN 0
+END FUNCTION
+
+FUNCTION doOpen(tmpname,cname)
+  DEFINE tmpname,cname STRING
+  DEFINE ans STRING
+  IF (ans:=checkFileSave())=S_CANCEL THEN 
+    RETURN tmpname
+  END IF
+  CALL initialize_when(TRUE)
+  IF ans="no" THEN 
+    CALL display_full(FALSE,FALSE)
+  END IF
+  CALL savelines()
+  IF cname IS NULL THEN
+    LET cname = fglped_filedlg()
+  END IF
+  IF cname IS NOT NULL THEN
+    IF NOT file_read(cname) THEN
+      CALL restorelines()
+      CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
+      LET cname=NULL
+    ELSE
+      CALL resetNewFile()
+      LET m_lastCRC=NULL
+      CALL savelines()
+      LET tmpname = setCurrFile(cname,tmpname)
+      CALL display_full(FALSE,FALSE)
+    END IF
+    IF NOT isPERFile(tmpname) THEN
+      CALL setPreviewActionActive(FALSE)
+    END IF
+  ELSE
+    --CALL display_full()
+  END IF
+  CALL hideOrShowPreview()
+  CALL compileTmp(tmpname,cname IS NOT NULL)
+  CALL flush_cm()
+  RETURN tmpname
 END FUNCTION
 
 FUNCTION is4GLFile(fname)
@@ -248,8 +442,12 @@ FUNCTION is4GLFile(fname)
 END FUNCTION
 
 FUNCTION isPERFile(fname)
-  DEFINE fname STRING
-  RETURN os.Path.extension(fname)=="per"
+  DEFINE fname,ext STRING
+  LET ext=os.Path.extension(fname)
+  IF ext IS NULL THEN
+    RETURN FALSE
+  END IF
+  RETURN ext=="per"
 END FUNCTION
 
 FUNCTION is4GLOrPerFile(fname)
@@ -264,28 +462,121 @@ FUNCTION compileTmp(tmpname,jump_to_error)
     LET compmess = saveAndCompile(tmpname,jump_to_error)
     IF compmess IS NULL THEN
       CALL mymessage("Compile ok")
+      IF isGBC() AND isPERFile(tmpname) AND getSessionId() IS NOT NULL THEN
+        CALL livePreview(tmpname)
+      END IF
     END IF
   END IF
 END FUNCTION
 
+FUNCTION getLiveURL(prog,arg)
+  DEFINE prog,arg STRING
+  DEFINE dirname,base STRING
+  DEFINE questpos INT
+  LET base=fgl_getenv("FGL_VMPROXY_START_URL") --https://fglfiddle.com:443/gas/ua/r/cm
+  DISPLAY "base:",base,",m_locationhref:",m_locationhref
+  IF base IS NOT NULL THEN
+        --https://fglfiddle.com:443/gas/ua/r/_fglcm_preview
+    RETURN myjoin(os.Path.dirName(base),sfmt("%1?Arg=%2",prog,arg)) 
+
+  END IF
+    --http://localhost:6395/gwc-js/index.html?app=_cm
+  LET base=fgl_getenv("FGL_WEBSERVER_HTTP_REFERER") 
+  IF base IS NOT NULL THEN
+    LET questpos=base.getIndexOf("?",1)
+    IF questpos>0 THEN
+      LET base=base.subString(1,questpos-1)
+      RETURN sfmt("%1?app=%2&Arg=%3",base,prog,arg)
+    END IF
+  END IF
+  IF m_locationhref IS NOT NULL THEN
+    LET base=m_locationhref
+    WHILE (dirname:=os.Path.dirName(base)) IS NOT NULL 
+          AND dirname<>"." AND os.Path.baseName(dirname)<>"ua"
+      LET base=dirname
+      DISPLAY "base:",base
+    END WHILE
+    RETURN myjoin(myjoin(dirname,"r"),sfmt("%1&Arg=%2",prog,arg))
+  END IF
+  RETURN "."
+END FUNCTION
+
+FUNCTION checkAppDataXCF()
+  DEFINE gaspub,gasappdatadir STRING
+  LET gaspub=fgl_getenv("GAS_PUBLIC_DIR")
+  IF gaspub IS NULL THEN
+    RETURN
+  END IF
+  LET gasappdatadir=mydir(gaspub)
+  LET gasappdatadir=myjoin(gasappdatadir,"app")
+  DISPLAY "gaspub:",gaspub,",gasappdatadir:", gasappdatadir
+  CALL writeXCF(gasappdatadir,"fglcm_webpreview")
+  CALL writeXCF(gasappdatadir,"spex")
+END FUNCTION
+
+FUNCTION writeXCF(gasappdatadir,appname)
+  DEFINE gasappdatadir,appname STRING
+  DEFINE xcfname,xcfcontent STRING
+  DEFINE c base.Channel
+  LET xcfname=myjoin(gasappdatadir,appname||".xcf")
+  IF os.Path.exists(xcfname) THEN
+    RETURN
+  END IF
+  LET xcfcontent=sfmt(
+    '<?xml version="1.0"?>\n'||
+    '<APPLICATION Parent="defaultgwc" '||
+    '    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '||
+    '    xsi:noNamespaceSchemaLocation="http://www.4js.com/ns/gas/2.30/cfextwa.xsd">\n'||
+    '  <EXECUTION AllowUrlParameters="TRUE">\n'||
+    '    <PATH>%1</PATH>\n'||
+    '    <MODULE>%2</MODULE>\n'||
+    '  </EXECUTION>\n'||
+    '</APPLICATION>' ,mydir(arg_val(0)),appname)
+  LET c=base.Channel.create()
+  TRY
+    CALL c.openFile(xcfname,"w")
+  CATCH
+    DISPLAY "Can't open xcf:",xcfname
+    RETURN
+  END TRY
+  CALL c.writeLine(xcfcontent)
+  CALL c.close()
+  DISPLAY "Did write XCF:",xcfname,",with Content:",xcfcontent
+END FUNCTION
+
+FUNCTION livePreview(tmpname)
+  DEFINE tmpname STRING
+  DEFINE liveurl STRING
+  CALL copyTmp2Session42f(tmpname)
+  CALL checkAppDataXCF()
+  LET liveurl=getLiveURL("fglcm_webpreview",util.Strings.urlEncode(getSessionId()))
+  #LET liveurl=myjoin(base,util.Strings.urlEncode(sfmt("_fglcm_webpreview?Arg=%1",dirname)))
+  #LET liveurl=myjoin(base,sfmt("_fglcm_webpreview?Arg=%1",util.Strings.urlEncode(real42f)))
+  DISPLAY "liveurl:",liveurl
+  DISPLAY liveurl TO webpreview
+  LET m_extURL=getLiveURL("spex",util.Strings.urlEncode(getSessionId()))
+END FUNCTION
+
 FUNCTION runprog(tmpname)
   DEFINE tmpname STRING
-  DEFINE srcname,cmdir,cmd,info,ts,tmp42f,tmp42fLast,real42f,tmp42m STRING
+  DEFINE srcname,cmdir,cmd,info,ts,tmp42m,dummy STRING
   DEFINE code INT
   DEFINE t TEXT
-  IF (m_lastCompiledPER==tmpname) THEN --need to cp the tmp 42f fo the real 42f
-    LET tmp42f=tmpname.subString(1,tmpname.getLength()-4),".42f"
-    LET tmp42fLast=os.Path.baseName(tmp42f)
-    LET real42f=os.Path.join(os.Path.dirName(tmp42f),tmp42fLast.subString(3,tmp42fLast.getLength()))
-    DISPLAY "tmp42f:",tmp42f,",real42f:",real42f
-    CALL os.Path.copy(tmp42f,real42f) RETURNING code
+  CALL compileAllForms(IIF(m_IsFiddle,os.Path.pwd(),os.Path.dirname(tmpname)))
+  IF (m_lastCompiledPER==tmpname) THEN 
+    --need to cp the current tmp 42f fo the real 42f
+    CALL copyTmp2Real42f(tmpname) RETURNING dummy
   END IF
-  LET srcname=m_lastCompiled4GL
+  IF m_IsFiddle THEN
+    LET srcname="main.4gl"
+  ELSE
+    LET srcname=m_lastCompiled4GL
+  END IF
   LET tmp42m=srcname.subString(1,srcname.getLength()-4)
-  LET cmdir=os.Path.dirname(arg_val(0))
-  LET cmd=os.Path.join(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.txt 2>&1"
+  LET cmdir=mydir(arg_val(0))
+  LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.txt 2>&1"
   RUN cmd RETURNING code
-  LET info=sfmt("Returned code:%1\n",code)
+  LET info=sfmt("Returned code from %1:%2\n",tmp42m,code)
   LOCATE t IN FILE "result.txt"
   LET ts=t
   LET info=info,ts
@@ -298,11 +589,136 @@ FUNCTION runprog(tmpname)
   CLOSE WINDOW output
 END FUNCTION
 
+FUNCTION to42f(pername)
+  DEFINE pername STRING
+  RETURN pername.subString(1,pername.getLength()-4)||".42f"
+END FUNCTION
+
+FUNCTION compileAllForms(dirpath)
+  DEFINE dirpath STRING
+  DEFINE dh,code INTEGER
+  DEFINE fname, name42f,cmd STRING
+  DEFINE mtper,mt42f DATETIME YEAR TO SECOND
+  LET dh = os.Path.diropen(dirpath)
+  IF dh == 0 THEN 
+    DISPLAY "Can't open directory:",dirpath
+    RETURN
+  END IF
+  WHILE TRUE
+      LET fname = os.Path.dirnext(dh)
+      IF fname IS NULL THEN 
+        EXIT WHILE 
+      END IF
+      IF NOT isPERFile(fname) THEN
+         CONTINUE WHILE
+      END IF
+      LET fname=os.Path.join(dirpath,fname)
+      IF os.Path.isDirectory(fname) THEN
+        CONTINUE WHILE
+      END IF
+      LET name42f = to42f(fname)
+      IF os.Path.exists(name42f) THEN
+        LET mtper=os.Path.mtime(fname)
+        LET mt42f=os.Path.mtime(name42f)
+        DISPLAY sfmt("%1 mtper:%2,mt42f:%3",fname,mtper,mt42f)
+        IF mt42f>=mtper THEN
+          DISPLAY sfmt("%1 already compiled",fname)
+          CONTINUE WHILE
+        END IF
+      END IF
+      LET cmd=buildCompileCmd(dirpath,"fglform","",fname)  
+      LET cmd=cmd,"&1"
+      RUN cmd RETURNING code
+      IF code THEN
+        DISPLAY "Can't compile:",fname
+      ELSE
+        DISPLAY "Compiled:",fname
+      END IF
+  END WHILE
+  CALL os.Path.dirclose(dh)
+END FUNCTION
+
+FUNCTION copyTmp2Real42f(tmpname)
+  DEFINE tmpname STRING
+  DEFINE tmp42f,tmp42fLast,real42f STRING
+  DEFINE code INT
+  LET tmp42f=to42f(tmpname)
+  LET tmp42fLast=os.Path.baseName(tmp42f)
+  LET real42f=myjoin(os.Path.dirName(tmp42f),tmp42fLast.subString(3,tmp42fLast.getLength()))
+  DISPLAY "tmp42f:",tmp42f,",real42f:",real42f
+  CALL os.Path.copy(tmp42f,real42f) RETURNING code
+  RETURN real42f
+END FUNCTION
+
+FUNCTION getSessionId()
+  DEFINE sessId STRING
+  LET sessId=fgl_getenv("FGL_VMPROXY_SESSION_ID")
+  LET sessId=sessId.subString(1,6)
+  RETURN sessId
+END FUNCTION
+
+FUNCTION getSession42f()
+  DEFINE sessionId STRING
+  LET sessionId=getSessionId()
+  IF sessionId IS NULL THEN
+    DISPLAY "No session id"
+    RETURN NULL
+  END IF
+  RETURN sfmt("/tmp/fglcm_%1.42f",sessionId)
+END FUNCTION
+
+--we delete webcomponents componentType attribute if we
+--encounter webcomponents otherwise the whole GBC dies
+FUNCTION copyDocWithoutComponentType(src,dest)
+  DEFINE src,dest STRING
+  DEFINE doc om.DomDocument
+  DEFINE rootNode,node om.DomNode
+  DEFINE nl om.NodeList
+  DEFINE txt STRING
+  DEFINE i INT
+  LET doc=om.DomDocument.createFromXmlFile(src)
+  IF doc IS NULL THEN
+    RETURN
+  END IF
+  LET rootNode=doc.getDocumentElement()
+  LET nl = rootNode.selectByPath("//WebComponent")
+  FOR i=1 TO nl.getLength()
+    LET node=nl.item(i)
+    CALL node.removeAttribute("componentType")
+  END FOR
+  LET txt=rootNode.getAttribute("text")
+  IF txt IS NULL THEN
+    CALL rootNode.setAttribute("text","<No text>")
+  END IF
+  CALL rootNode.writeXml(dest)
+END FUNCTION
+
+FUNCTION copyTmp2Session42f(tmpname)
+  DEFINE tmpname STRING
+  DEFINE tmp42f,session42f STRING
+  LET tmp42f=tmpname.subString(1,tmpname.getLength()-4),".42f"
+  LET session42f=getSession42f()
+  IF session42f IS NOT NULL THEN
+    --CALL os.Path.copy(tmp42f,session42f) RETURNING code
+    CALL copyDocWithoutComponentType(tmp42f,session42f)
+  END IF
+END FUNCTION
+
 FUNCTION preview_form()
   DEFINE tmp42f STRING
   LET tmp42f=m_lastCompiledPER
   LET tmp42f=tmp42f.subString(1,tmp42f.getLength()-4),".42f"
   CALL showform(tmp42f)
+END FUNCTION
+
+FUNCTION show_previewurl()
+  OPEN WINDOW previewurl WITH FORM "fglcm_previewurl"
+  DISPLAY m_extURL TO previewurl
+  MENU
+    ON ACTION close
+      EXIT MENU
+  END MENU
+  CLOSE WINDOW previewurl
 END FUNCTION
 
 FUNCTION showform(ff)
@@ -319,30 +735,24 @@ END FUNCTION
 
 FUNCTION mymessage(msg)
   DEFINE msg STRING
+  IF NOT m_mainFormOpen THEN
+    RETURN
+  END IF
+  DISPLAY msg TO info
+  {
   IF ui.Interface.getFrontEndName()=="GBC" THEN
     --TODO
     --the message block overlaps the editor with larger messages
     RETURN
   END IF
-  MESSAGE msg
+  MESSAGE msg -- in GDC this message sometimes causes black flicker
+  }
 END FUNCTION
 
-FUNCTION update()
-  DEFINE newVal STRING
-  DEFINE cmRec CmType
-  --LET newVal=fgl_dialog_getbuffer()
-  CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getData"],[newVal])
-  CALL util.JSON.parse(newVal,cmRec)
-  DISPLAY "cm:",util.JSON.stringify(cmRec)
-  DISPLAY "----"
-  LET m_cline=cmRec.cursor1.line+1
-  LET m_ccol=cmRec.cursor1.ch+1
-  DISPLAY cmRec.full
-  DISPLAY "----"
-  --LET cm=newVal
-END FUNCTION
-
-FUNCTION fcsync()
+FUNCTION fcsync() --called if our topmenu fired an action
+  --we do not use the new 3.10 onFlush Webco mechanism because we want to use
+  --the 3.00 GDC too, so we have to explicitly flush the component 
+  --the drawback: this costs an additional client server round trip
   DEFINE newVal STRING
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","fcsync"],[newVal])
   CALL syncInt(newVal)
@@ -369,6 +779,7 @@ FUNCTION syncInt(newVal)
   --LET src=cmRec.full
   LET m_cline=cmRec.cursor1.line+1
   LET m_ccol=cmRec.cursor1.ch+1
+  LET m_locationhref=cmRec.locationhref
   LET len=cmRec.modified.getLength()
   FOR i=1 TO len
     LET orgnum=cmRec.modified[i].orgnum+1
@@ -519,16 +930,19 @@ FUNCTION display_full(initialize,flush)
   DEFINE ext,basename STRING
   CALL initialize_when(initialize)
   LET m_cmRec.full=arr2String()
-  LET ext=os.Path.extension(m_srcfile)
-  LET basename=os.Path.baseName(m_srcfile)
-  CASE 
-    WHEN ext.getLength()>0 
-      LET m_cmRec.extension=ext
-    WHEN basename.toLowerCase()=="makefile"
-      LET m_cmRec.extension="makefile"
-    WHEN m_IsNewFile
-      LET m_cmRec.extension=m_NewFileExt
-  END CASE
+  IF m_IsNewFile THEN
+    LET m_cmRec.fileName=sfmt("newfile%1.%2",m_cmdIdx,m_NewFileExt)
+    LET m_cmRec.extension=m_NewFileExt
+  ELSE
+    LET ext=os.Path.extension(m_srcfile)
+    LET basename=os.Path.baseName(m_srcfile)
+    CASE 
+      WHEN ext.getLength()>0 
+        LET m_cmRec.extension=ext
+      WHEN basename.toLowerCase()=="makefile"
+        LET m_cmRec.extension="makefile"
+    END CASE
+  END IF
   DISPLAY "display_full:",m_srcfile,",ext:",m_cmRec.extension,",basename:",basename
   CALL flush_when(flush)
   LET m_lastCRC=NULL
@@ -566,6 +980,19 @@ FUNCTION saveAndCompile(fname,jump_to_error)
   RETURN compmess
 END FUNCTION
 
+FUNCTION buildCompileCmd(dirname,compOrForm,cparam,fname)
+  DEFINE dirname,compOrForm,cparam,fname STRING
+  DEFINE cmd STRING
+  IF file_on_windows() THEN
+    LET cmd=sfmt("set FGLDBPATH=%1;%%FGLDBPATH%% && %2 %3 -M -Wall %4 2>",
+            dirname,compOrForm,cparam,fname)
+  ELSE
+    LET cmd=sfmt("export FGLDBPATH=\"%1\":$FGLDBPATH && %2 %3 -M -Wall \"%4\" 2>",
+            dirname,compOrForm,cparam,fname)
+  END IF
+  RETURN cmd
+END FUNCTION
+
 FUNCTION compile_source(fname,proposals)
   DEFINE fname STRING
   DEFINE proposals INT
@@ -573,7 +1000,7 @@ FUNCTION compile_source(fname,proposals)
   DEFINE result STRING
   DEFINE code,i,atidx,dummy INT
   DEFINE isPER BOOLEAN
-  LET dirname=file_get_dirname(fname)
+  LET dirname=mydir(fname)
   LET isPER=isPERFile(fname)
   IF isPER THEN
     LET cparam="-c"
@@ -584,14 +1011,12 @@ FUNCTION compile_source(fname,proposals)
   IF isPER OR proposals THEN
     LET cparam=sfmt("%1 %2,%3",cparam,m_cline,m_ccol)
   ELSE
-    LET cparam=""
+    IF NOT isPER THEN
+      LET cparam="-r"
+    END IF
   END IF
   LET compOrForm=IIF(isPER,"fglform","fglcomp")
-  IF file_on_windows() THEN
-    LET cmd=sfmt("set FGLDBPATH=%1;%%FGLDBPATH%% && %2 %3 -M -Wall %4 2>",dirname,compOrForm,cparam,fname)
-  ELSE
-    LET cmd=sfmt("export FGLDBPATH=\"%1\":$FGLDBPATH && %2 %3 -M -Wall \"%4\" 2>",dirname,compOrForm,cparam,fname)
-  END IF
+  LET cmd=buildCompileCmd(dirname,compOrForm,cparam,fname)
   CALL compile_arr.clear()
   --DISPLAY "cmd=",cmd
   IF proposals THEN
@@ -602,7 +1027,7 @@ FUNCTION compile_source(fname,proposals)
     LET cmd1=cmd,tmpName
     RUN cmd1 RETURNING code 
     IF isPER THEN
-      CALL setActionActive("preview",code==0)
+      CALL setPreviewActionActive(code==0)
       LET m_lastCompiledPER=IIF(code==0,fname,NULL)
     ELSE
       CALL setActionActive("run",code==0)
@@ -705,7 +1130,7 @@ END FUNCTION
 
 FUNCTION checkChangedArray()
   DEFINE savelen,len,i INT
-  IF m_modified=FALSE THEN
+  IF m_modified==FALSE THEN
     DISPLAY "checkChangedArray() no mod"
     RETURN FALSE
   END IF
@@ -741,10 +1166,6 @@ FUNCTION my_write(fname)
   IF NOT file_write(fname) THEN
     CALL fgl_winmessage(S_ERROR,sfmt("Can't write to:%1",fname),IMG_ERROR)
     RETURN FALSE
-  END IF
-  IF fname == m_srcfile THEN
-    LET m_IsNewFile=FALSE
-    LET m_NewFileExt=NULL
   END IF
   DISPLAY "did write to:",fname
   RETURN TRUE
@@ -889,17 +1310,6 @@ FUNCTION arr2String()
   RETURN result
 END FUNCTION
 
---gives back the directory portion of a filename
-FUNCTION file_get_dirname(filename)
-  DEFINE filename STRING
-  DEFINE dirname STRING
-  LET dirname=os.Path.dirname(filename)
-  IF dirname IS NULL THEN
-    LET dirname="."
-  END IF
-  RETURN dirname
-END FUNCTION
-
 FUNCTION file_write_int(srcfile,mode)
   DEFINE srcfile STRING
   DEFINE mode STRING
@@ -1010,7 +1420,9 @@ FUNCTION checkFileSave()
   DEFINE ans STRING
   DEFINE dummy INT
   IF checkChangedArray() THEN
-    IF (ans:=fgl_winquestion("fglcm",sfmt("Save changes to %1?",m_title),"yes","yes|no|cancel","question",0))="yes" THEN
+    IF (ans:=fgl_winquestion("fglcm",sfmt("Save changes to %1?",m_title),
+         "yes","yes|no|cancel","question",0))="yes" 
+    THEN
       IF isNewFile() THEN
         LET m_srcfile=fglped_saveasdlg(m_srcfile)
         IF m_srcfile IS NULL THEN
@@ -1018,6 +1430,10 @@ FUNCTION checkFileSave()
         END IF
       END IF
       CALL my_write(m_srcfile) RETURNING dummy
+      IF m_IsNewFile THEN
+        CALL mysetTitle()
+        CALL resetNewFile()
+      END IF
     END IF
   END IF
   RETURN ans
@@ -1026,6 +1442,7 @@ END FUNCTION
 FUNCTION file_new(ext)
   DEFINE ext STRING
   DEFINE cancel BOOLEAN
+  DEFINE t TEXT
   IF ext IS NULL THEN
     OPEN WINDOW file_new WITH FORM "fglcm_filenew" ATTRIBUTE(TEXT="Please choose a File type")
     MENU 
@@ -1050,10 +1467,22 @@ FUNCTION file_new(ext)
   CALL m_orglines.clear()
   LET m_orglines[1].line=" " CLIPPED
   LET m_orglines[1].orgnum=1
+  CASE ext
+    WHEN "per"
+      LET m_orglines[1].line="LAYOUT" LET m_orglines[1].orgnum=1
+      LET m_orglines[2].line="GRID"   LET m_orglines[2].orgnum=2
+      LET m_orglines[3].line="{"      LET m_orglines[3].orgnum=3
+      LET m_orglines[4].line="X"      LET m_orglines[4].orgnum=4
+      LET m_orglines[5].line="}"      LET m_orglines[5].orgnum=5      
+      LET m_orglines[6].line="END"    LET m_orglines[6].orgnum=6      
+    WHEN "4st"
+      LOCATE t IN FILE myjoin(myjoin(fgl_getenv("FGLDIR"),"lib"),"default.4st")
+      CALL split_src(t)
+  END CASE
   LET m_IsNewFile = TRUE
   LET m_NewFileExt=ext
   CALL savelines()
-  CALL fgl_winMessage("fglcm",sfmt("ext is:%1",ext),"info")
+  CALL mymessage(sfmt("New file with extension:%1",ext))
   RETURN ext
 END FUNCTION
 
@@ -1074,9 +1503,9 @@ FUNCTION getTmpFileName(fname)
   IF fname IS NULL THEN
     LET tmpname=".@__empty__.",m_NewFileExt
   ELSE
-    LET dir=file_get_dirname(fname)
+    LET dir=mydir(fname)
     LET shortname=os.Path.basename(fname)
-    LET tmpname=os.Path.join(dir,sfmt(".@%1",shortname))
+    LET tmpname=myjoin(dir,sfmt(".@%1",shortname))
   END IF
   RETURN tmpname
 END FUNCTION
@@ -1085,6 +1514,11 @@ END FUNCTION
 --or File->New From Wizard
 FUNCTION isNewFile()
   RETURN (m_srcfile IS NULL)  OR m_IsNewFile
+END FUNCTION
+
+FUNCTION resetNewFile()
+  LET m_isNewFile=NULL
+  LET m_NewFileExt=NULL
 END FUNCTION
 
 FUNCTION delete_tmpfiles(tmpname)
@@ -1113,20 +1547,54 @@ END FUNCTION
 
 FUNCTION fglped_saveasdlg(fname)
   DEFINE fname STRING
-  DEFINE filename STRING
+  DEFINE filename,ext,newext,lst STRING
+  DEFINE r1 FILEDLG_RECORD
   --CALL fgl_winmessage("Info",sfmt("fglped_saveasdlg %1",fname),"info")
-  IF fname IS NULL THEN
-    LET fname=os.Path.pwd()
+  IF m_IsNewFile THEN
+    LET ext=m_NewFileExt
+  ELSE
+    LET ext=os.Path.extension(m_srcfile)
   END IF
-  CALL ui.Interface.frontCall("standard","saveFile", [fname, "All Files", "*.*", "Save File" ], [filename])
+  IF _isLocal() THEN
+    IF fname IS NULL THEN
+      LET fname=os.Path.pwd()
+    END IF
+    LET lst=IIF(ext IS NULL,"*.*","*."||ext||" *.*")
+    CALL ui.Interface.frontCall("standard","saveFile", [fname, "Genero file",lst, "Save File" ], 
+       [filename])
+  ELSE
+    LET r1.title="Please specify disk file name for the current document"
+    IF m_IsFiddle THEN
+      LET r1.opt_root_dir=os.Path.pwd()
+    END IF
+    LET r1.types[1].description="Genero ",ext," file"
+    LET r1.types[1].suffixes="*.",ext
+    LET r1.types[2].description="All files (*.*)"
+    LET r1.types[2].suffixes="*.*"
+    LET filename= filedlg_save(r1.*)
+  END IF
+  IF filename IS NULL THEN
+    RETURN NULL
+  END IF
   DISPLAY "filename:",filename
+  LET newext=os.Path.extension(filename)
+  IF newext.getLength()==0 AND ext.getLength()>0 THEN
+    LET filename=filename,".",ext
+  END IF
+  --IF os.Path.exists(filename) THEN
+  --  IF NOT _filedlg_mbox_yn("Warning",sfmt("File '%1' already exists, do you want to replace it ?",
+       --filename),"question") THEN
+  --    RETURN NULL
+  --  END IF
+  --END IF
   RETURN filename
 END FUNCTION
 
 {
 FUNCTION fglped_filedlg()
   DEFINE filename STRING
-  CALL ui.Interface.frontCall("standard","openfile", [os.Path.pwd(), "All Files", "*", "Open File" ], [filename])
+  CALL ui.Interface.frontCall("standard","openfile", [os.Path.pwd(), "All Files", "*", "Open File" ], 
+    [filename])
   RETURN filename
 END FUNCTION
 }
@@ -1134,14 +1602,17 @@ FUNCTION fglped_filedlg()
   DEFINE fname STRING
   DEFINE r1 FILEDLG_RECORD
   IF _isLocal() THEN
-    CALL ui.interface.frontCall("standard","openfile",[os.Path.pwd(),"Form Files","*.per","Please choose a form"],[fname])
+    CALL ui.interface.frontCall("standard","openfile",[os.Path.pwd(),"Form Files","*.per",
+      "Please choose a form"],[fname])
   ELSE
     LET r1.title="Please choose a file"
-    LET r1.opt_root_dir=os.Path.pwd()
-    LET r1.types[1].description="Genero files (*.4gl)"
-    LET r1.types[1].suffixes="*.4gl"
-    LET r1.types[2].description="Form files (*.per)"
-    LET r1.types[2].suffixes="*.per"
+    IF m_IsFiddle THEN --sandbox
+      LET r1.opt_root_dir=os.Path.pwd()
+    END IF
+    LET r1.types[1].description="Genero source files (*.4gl,*.per)"
+    LET r1.types[1].suffixes="*.4gl|*.per"
+    LET r1.types[2].description="Genero resource files (*.4st,*.4ad,*.4tm,*.4sm,*.4tb)"
+    LET r1.types[2].suffixes="*.4st|*.4ad|*.4tm|*.4sm|*.4tb"
     LET r1.types[3].description="All files (*.*)"
     LET r1.types[3].suffixes="*.*"
     LET fname= filedlg_open(r1.*)
@@ -1150,9 +1621,21 @@ FUNCTION fglped_filedlg()
 END FUNCTION
 
 FUNCTION split_src(src)
-  DEFINE src STRING
+  DEFINE src,line STRING
   DEFINE tok base.StringTokenizer
+  DEFINE linenum INT
+  CALL m_orglines.clear()
   LET tok=base.StringTokenizer.create(src,"\n")
+  LET linenum=1
+  WHILE tok.hasMoreTokens()
+    LET line=tok.nextToken()
+    IF line.getLength()==0 AND linenum>1 THEN
+      EXIT WHILE
+    END IF
+    LET m_orglines[linenum].line=line
+    LET m_orglines[linenum].orgnum=linenum
+    LET linenum=linenum+1
+  END WHILE
 END FUNCTION
 
 FUNCTION initCRC32Table()
@@ -1181,6 +1664,8 @@ FUNCTION crc32(str)
   RETURN big
 END FUNCTION
 
+--CRC32 algorithm in 4GL
+--it does not work for a "char" semantic encoded STRING
 FUNCTION crc32int(str)
   DEFINE str,ch STRING
   DEFINE crc,len,i,code,idx,res INT

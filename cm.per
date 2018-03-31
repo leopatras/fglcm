@@ -1,32 +1,27 @@
 ACTION DEFAULTS
-  ACTION new ( Text="&New", COMMENT="Creates a new form" , ACCELERATOR=CONTROL-N)
-  --ACTION newfromwiz ( Text="New From &Wizard", COMMENT="Creates a new form using the fglped wizard")
+  ACTION new ( Text="&New", COMMENT="Creates a new module/form/style file" , ACCELERATOR=ALT-C,ACCELERATOR2=CONTROL-N,DEFAULTVIEW=NO)
   ACTION saveas ( Text="Save &As", COMMENT="Saves the form under another name"  )
   --ACTION browse ( Text="Browse..", COMMENT="Browses all forms in the directory of the current form" ,ACCELERATOR=CONTROL-B )
-  ACTION close ( Text="&Exit", COMMENT="Closes this window", ACCELERATOR=ALT-F4,ACCELERATOR2=CONTROL-W)
+  ACTION close ( Text="&Exit", COMMENT="Closes this window", ACCELERATOR=ALT-Q,ACCELERATOR2=CONTROL-W,DEFAULTVIEW=NO)
   --ACTION compile ( Text="&Compile", COMMENT="compiles", ACCELERATOR=F5)
-  ACTION preview ( Text="&Preview Form", COMMENT="Previews the current form if it is compilable", ACCELERATOR=CONTROL-B,ACCELERATOR2=F6)
-  ACTION viewerr ( Text="View &Error", COMMENT="compiles and refreshes the form,jumps immediately to the first error", ACCELERATOR=F6)
-  --ACTION previewopt ( Text="P&reviewOpt", COMMENT="compiles,postprocess and refreshes the form", ACCELERATOR=F6)
-  ACTION open ( Text="&Open...", COMMENT="Opens an existing file", ACCELERATOR=CONTROL-O)
-  ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=CONTROL-S)
-  ACTION run (TEXT="Run", COMMENT="Runs the current program" ,ACCELERATOR=F5,ACCELERATOR=CONTROL-R)
+  ACTION preview ( Text="&Full Screen Preview", COMMENT="Previews the current form if it is compilable", ACCELERATOR=F6,IMAGE="fa-expand")
+  --ACTION viewerr ( Text="View &Error", COMMENT="compiles and refreshes the form,jumps immediately to the first error", ACCELERATOR=F6)
+  ACTION open ( Text="&Open...", COMMENT="Opens an existing file", ACCELERATOR=ALT-O,ACCELERATOR2=CONTROL-O,DEFAULTVIEW=NO)
+  ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=ALT-S,ACCELERATOR2=CONTROL-S,DEFAULTVIEW=NO)
+  ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
   --ACTION jump_to_def( TEXT="Jump to Definition")
-  --ACTION find ( TEXT="Find..." ,COMMENT ="Finds the specified text",ACCELERATOR=CONTROL-F,IMAGE="find" )
-  --ACTION findnext  ( TEXT="Find Next", comment="Finds the next occurence of the search string", ACCELERATOR=F3 ,image="empty")
-  --ACTION jump_to_def ( TEXT="Jump to definition" ,IMAGE="arrdown",ACCELERATOR=F2)
+  ACTION find ( TEXT="Search..." ,COMMENT ="Opens a dialog to search text",ACCELERATOR=ALT-F,ACCELERATOR2=CONTROL-F,IMAGE="find" )
+  ACTION findnext  ( TEXT="Find Next", comment="Finds the next occurence of the search string", ACCELERATOR=F3 ,ACCELERATOR2=Control-G)
+  ACTION replace ( TEXT="Replace..." ,COMMENT ="Opens a dialog to search/replace text",ACCELERATOR=SHIFT-ALT-F,ACCELERATOR2=CONTROL-SHIFT-F,IMAGE="replace" )
+
   --ACTION findword (TEXT="Find Word", COMMENT="Finds the next occurence of the word the cursor is over" ,ACCELERATOR=CONTROL-W)
-  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=CONTROL-L)
-  --ACTION replace ( TEXT="Replace..." ,COMMENT ="Replaces the specified text with another text",ACCELERATOR=CONTROL-H)
-  --ACTION replaceagain ( TEXT="Replace Again" ,COMMENT ="Replaces the current searched text with the value from the replace dialog",ACCELERATOR=F4)
-  --ACTION undolastreplace ( TEXT="Undo last replace", COMMENT = "Rolls back the change from the last replace operation", ACCELERATOR=SHIFT-F4)
-  --ACTION choose_style ( TEXT="Choose Window S&tyle...", COMMENT = "Takes a user defined style to display the current forms", ACCELERATOR=CONTROL-T)
-  --ACTION toggle_text ( TEXT="Toggle Text Display", COMMENT = "Fills the fields with  characters according to their length", ACCELERATOR=CONTROL-L)
+  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=CONTROL-L,DEFAULTVIEW=NO)
+  ACTION showpreviewurl(TEXT="Show Preview URL",COMMENT="Enables copying the preview URL to other clients")
 END
 
 TOPMENU
   GROUP top_file (TEXT="File")
-    --COMMAND new (TEXT="New")
+    COMMAND new (TEXT="New")
     --COMMAND newfromwiz
     COMMAND open
     SEPARATOR
@@ -36,7 +31,8 @@ TOPMENU
     --COMMAND browse (TEXT="Browse...")
   END
   GROUP edit (TEXT="Edit")
-  --  COMMAND find
+    COMMAND find
+    COMMAND replace
   --  COMMAND findnext
   --  COMMAND findword
   --  SEPARATOR
@@ -52,54 +48,45 @@ TOPMENU
   --  COMMAND editpaste
   --  COMMAND editcut
   END
-  GROUP(TEXT="Product")
-      COMMAND preview
-      COMMAND run
-  END 
   --GROUP(TEXT="View")
-  --  COMMAND preview 
-  --  COMMAND viewerr
-    --COMMAND choose_style
-  --  COMMAND toggle_text
+  --  COMMAND toggle_toolbar 
   --END
+  GROUP(TEXT="Product")
+      COMMAND run
+      SEPARATOR
+      COMMAND preview
+      COMMAND showpreviewurl
+  END 
+  
 END
-LAYOUT
+TOOLBAR fiddlebar
+  ITEM main4gl(TEXT="Program",IMAGE="document_4gl",COMMENT="Main source (main.4gl)")
+  ITEM run
+  SEPARATOR
+  ITEM mainper(TEXT="Form",IMAGE="document_4fd",COMMENT="Main form (main.per)")
+  ITEM preview(HIDDEN)
+LAYOUT(STYLE="cm",MINHEIGHT=40,MINWIDTH=90)
 GRID
 {
-[cm                                                                                         ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
-[                                                                                           ]
+[cm                                                         |webpreview                                            ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[info                                                                                                              ]
 }
 END
 ATTRIBUTES
-WEBCOMPONENT cm=FORMONLY.cm,COMPONENTTYPE="fglcm",STRETCH=BOTH,SIZEPOLICY=FIXED;
+WEBCOMPONENT cm=FORMONLY.cm,COMPONENTTYPE="fglcm",STRETCH=BOTH;
+WEBCOMPONENT webpreview=FORMONLY.webpreview,STRETCH=BOTH,HIDDEN;
+LABEL info=FORMONLY.info;

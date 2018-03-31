@@ -29,7 +29,7 @@ ifeq ($(UNAME),Linux)
   CRC32=./crc32
 endif
 
-all:: $(CRC32) $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js $(CMDIR)/lib/codemirror.js cm.42m $(FORMS)
+all:: $(CRC32) $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js $(CMDIR)/lib/codemirror.js cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
 
 cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m
 

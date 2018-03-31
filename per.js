@@ -351,7 +351,7 @@ var keywords={
           return "comment";
         }
       }
-      else if (ch == "," || ch=="." || ch=="=" ) {
+      else if (!state.IN_GRID && (ch == "," || ch=="." || ch=="=" ||ch==":" )) {
         return "qualifier";
       }
       else if (ch == '"' && stream.skipTo('"')) {
