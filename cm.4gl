@@ -93,10 +93,7 @@ DEFINE m_cm STRING
 
 MAIN
   DEFINE result INT
-  DEFER INTERRUPT
-  --RUN "env | sort"
   LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
-  --LET m_IsFiddle=TRUE
   CALL ui.Interface.loadStyles("fglcm")
   --CALL initCRC32Table()
   LET m_lastCRC=NULL
