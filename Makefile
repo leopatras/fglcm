@@ -52,11 +52,36 @@ $(CMDIR)/lib/codemirror.js: $(CMDIR) #some trial and error is behind these lines
 	#cd $(CMDIR) && npm install rollup-plugin-buble && rollup -c
 	cd $(CMDIR) && npm install && ./node_modules/rollup/bin/rollup -c
 
+$(FGLDIR)/demo/demo.sch: 
+	$(MAKE) -C $(FGLDIR)/demo demo.sch
+
+cmdemo.42m: $(FGLDIR)/demo/demo.sch $(FGLDIR)/demo/demo_load.42m $(FGLDIR)/demo/demo.42m cmdemo.4gl cmdemo.42f
+#	-mv $(FGLDIR)/demo/MobileDemo $(FGLDIR)/demo/MobileDemoXX
+#	$(MAKE) -C $(FGLDIR)/demo
+#	-mv $(FGLDIR)/demo/MobileDemoXX $(FGLDIR)/demo/MobileDemo
+	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglcomp -M -Wall cmdemo.4gl
+
+cmdemo.42f: $(FGLDIR)/demo/demo.sch cmdemo.per
+	FGLDBPATH=$(FGLDIR)/demo fglform -M -Wall cmdemo.per
+
+runcmdemo: cmdemo.42m cmdemo.42f
+	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun cmdemo
+
+fiddle: all cmdemo.42m cmdemo.42f
+	-mkdir home
+	cp main.4gl main.per home/
+	cd home && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home fglrun $(CURDIR)/cm.42m main.4gl
+
+webfiddle: all cmdemo.42m cmdemo.42f
+	-mkdir home
+	cp main.4gl main.per home/
+	cd home && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home $(CURDIR)/fglwebrun/fglwebrun $(CURDIR)/cm.42m main.4gl
+
 demo: all
 	fglrun cm.42m test/foo.4gl
 
 clean_prog:
-	rm -f *.42? .*.42?
+	rm -f *.42? .*.42? home/*.*
 
 clean: clean_prog
 	rm -f ./crc32 keywords.js $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js

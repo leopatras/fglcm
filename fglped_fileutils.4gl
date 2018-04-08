@@ -367,3 +367,26 @@ FUNCTION file_normalize_dir(fname)
   CALL file_get_output(cmd,arr)
   RETURN arr[1]
 END FUNCTION
+
+FUNCTION is4GLFile(fname)
+  DEFINE fname,ext STRING
+  LET ext=os.Path.extension(fname)
+  IF ext IS NULL THEN
+    RETURN FALSE
+  END IF
+  RETURN ext=="4gl"
+END FUNCTION
+
+FUNCTION isPERFile(fname)
+  DEFINE fname,ext STRING
+  LET ext=os.Path.extension(fname)
+  IF ext IS NULL THEN
+    RETURN FALSE
+  END IF
+  RETURN ext=="per"
+END FUNCTION
+
+FUNCTION is4GLOrPerFile(fname)
+  DEFINE fname STRING
+  RETURN is4GLFile(fname) OR isPERFile(fname) 
+END FUNCTION

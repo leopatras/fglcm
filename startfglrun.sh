@@ -12,10 +12,20 @@ cp "$1"/*.42* "$MYTEMP/" 2>/dev/null
 cp "$1"/*.4st "$MYTEMP/" 2>/dev/null
 cp "$1"/*.4ad "$MYTEMP/" 2>/dev/null
 cp "$1"/*.4tm "$MYTEMP/" 2>/dev/null
+cp "$1"/*.4tb "$MYTEMP/" 2>/dev/null
+cp "$1"/*.unl "$MYTEMP/" 2>/dev/null
 cp "$1"/*.4sm "$MYTEMP/" 2>/dev/null
+cp "$1"/*.data "$MYTEMP/" 2>/dev/null
+cp "$1"/*.test "$MYTEMP/" 2>/dev/null
+cp "$1"/*.sch "$MYTEMP/" 2>/dev/null
+cp "$1"/*.png "$MYTEMP/" 2>/dev/null
+export FGLIMAGEPATH=$MYTEMP:$FGLIMAGEPATH
 cd "$MYTEMP"
-fglrun "$2"
+if [ -f "$1"/main.args ] ; then
+  MYARGS=`cat "$1"/main.args`
+fi
+fglrun "$2" $MYARGS
 RETVAL=$?
-cd -
+cd - >/dev/null
 rm -rf "$MYTEMP"
 exit $RETVAL

@@ -1,0 +1,59 @@
+# Property of Four Js*
+# (c) Copyright Four Js 1995, 2018. All Rights Reserved.
+# * Trademark of Four Js Development Tools Europe Ltd
+#   in the United States and elsewhere
+# 
+# Four Js and its suppliers do not warrant or guarantee that these
+# samples are accurate and suitable for your purposes. Their inclusion is
+# purely for information purposes only.
+
+SCHEMA demo
+LAYOUT(text="fglfiddle - Choose from Demos / Run Demos")
+GRID
+{
+ [label                                               ]
+ <tree t1                              ><t t2                                                                               >
+  Topic                                  Demo              Program   Arguments  Type  Description
+ [topic                                ][demo             |prog     |args      |t    |desc                                  ]
+ <                                     ><                                                                                   >
+[readme                                                                                                                      ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+[                                                                                                                            ]
+}
+END 
+END
+
+TABLES 
+    demos,
+    topics
+
+ATTRIBUTES
+    LABEL label:text="Demo directory", STYLE="title";
+
+    TREE t1: IDCOLUMN = name, PARENTIDCOLUMN = parent;
+    topic = topics.name;
+    PHANTOM topics.parent;
+    PHANTOM topics.dirname;
+
+    TABLE t2: DOUBLECLICK = show_or_run, HEIGHT = 15 LINES;
+    demo = demos.name;
+    prog = demos.program;
+    args = demos.args;
+    IMAGE t = demos.type;
+    PHANTOM demos.database;
+    desc = demos.description;
+    PHANTOM demos.dirname;
+
+    TEXTEDIT readme = FORMONLY.readme, STRETCH=BOTH, FONTPITCH=FIXED, NOTEDITABLE;
+
+INSTRUCTIONS
+    SCREEN RECORD s_topics(topics.*);
+    SCREEN RECORD s_demos(demos.*);

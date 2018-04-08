@@ -1,5 +1,5 @@
 ACTION DEFAULTS
-  ACTION new ( Text="&New", COMMENT="Creates a new module/form/style file" , ACCELERATOR=ALT-C,ACCELERATOR2=CONTROL-N,DEFAULTVIEW=NO)
+  ACTION new ( Text="&New", COMMENT="Creates a new module/form/style file" , ACCELERATOR=ALT-N,ACCELERATOR2=CONTROL-N,DEFAULTVIEW=NO)
   ACTION saveas ( Text="Save &As", COMMENT="Saves the form under another name"  )
   --ACTION browse ( Text="Browse..", COMMENT="Browses all forms in the directory of the current form" ,ACCELERATOR=CONTROL-B )
   ACTION close ( Text="&Exit", COMMENT="Closes this window", ACCELERATOR=ALT-Q,ACCELERATOR2=CONTROL-W,DEFAULTVIEW=NO)
@@ -12,10 +12,10 @@ ACTION DEFAULTS
   --ACTION jump_to_def( TEXT="Jump to Definition")
   ACTION find ( TEXT="Search..." ,COMMENT ="Opens a dialog to search text",ACCELERATOR=ALT-F,ACCELERATOR2=CONTROL-F,IMAGE="find" )
   ACTION findnext  ( TEXT="Find Next", comment="Finds the next occurence of the search string", ACCELERATOR=F3 ,ACCELERATOR2=Control-G)
-  ACTION replace ( TEXT="Replace..." ,COMMENT ="Opens a dialog to search/replace text",ACCELERATOR=SHIFT-ALT-F,ACCELERATOR2=CONTROL-SHIFT-F,IMAGE="replace" )
+  ACTION replace ( TEXT="Replace..." ,COMMENT ="Opens a dialog to search/replace text",ACCELERATOR=CONTROL-ALT-F,ACCELERATOR2=CONTROL-SHIFT-F,IMAGE="replace" )
 
   --ACTION findword (TEXT="Find Word", COMMENT="Finds the next occurence of the word the cursor is over" ,ACCELERATOR=CONTROL-W)
-  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=CONTROL-L,DEFAULTVIEW=NO)
+  ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=ALT-L,ACCELERATOR2=CONTROL-L,DEFAULTVIEW=NO)
   ACTION showpreviewurl(TEXT="Show Preview URL",COMMENT="Enables copying the preview URL to other clients")
 END
 
@@ -59,12 +59,17 @@ TOPMENU
   END 
   
 END
+
 TOOLBAR fiddlebar
-  ITEM main4gl(TEXT="Program",IMAGE="document_4gl",COMMENT="Main source (main.4gl)")
+  ITEM browse_demos(TEXT="Demos",IMAGE="fa-sitemap",COMMENT="Browse demos and select samples")
+  SEPARATOR
+  ITEM main4gl(TEXT="Program",IMAGE="fa-file-text-o",COMMENT="Main source (main.4gl)")
   ITEM run
   SEPARATOR
-  ITEM mainper(TEXT="Form",IMAGE="document_4fd",COMMENT="Main form (main.per)")
+  ITEM mainper(TEXT="Form",IMAGE="fa-list-alt",COMMENT="Main form (main.per)")
   ITEM preview(HIDDEN)
+END
+
 LAYOUT(STYLE="cm",MINHEIGHT=40,MINWIDTH=90)
 GRID
 {

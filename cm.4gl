@@ -247,8 +247,10 @@ FUNCTION edit_source(fname)
       CALL setPreviewActionActive(FALSE)
       CALL DIALOG.setActionActive("main4gl",m_IsFiddle)
       CALL DIALOG.setActionActive("mainper",m_IsFiddle)
+      CALL DIALOG.setActionActive("browse_demos",m_IsFiddle)
       CALL DIALOG.setActionHidden("main4gl",NOT m_IsFiddle)
       CALL DIALOG.setActionHidden("mainper",NOT m_IsFiddle)
+      CALL DIALOG.setActionHidden("browse_demos",NOT m_IsFiddle)
       CALL initialize_when(TRUE)
       CALL compileTmp(tmpname,TRUE)
       CALL display_full(FALSE,FALSE)
@@ -299,9 +301,12 @@ LABEL action_close:
       CALL compileTmp(tmpname,FALSE)
       CALL flush_cm()
 
-
+    ON ACTION gotoline_cm
+      CALL sync()
+      GOTO action_gotoline
     ON ACTION gotoline
       CALL fcsync()
+LABEL action_gotoline:
       CALL do_gotoline()
 
     ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
@@ -388,6 +393,10 @@ LABEL dosaveas:
           CALL display_full(TRUE,TRUE)
         END IF
       END IF
+
+    ON ACTION browse_demos
+      CALL fcsync()
+      LET tmpname=browse_demos(tmpname)
   END INPUT
   CALL delete_tmpfiles(tmpname)
   DISPLAY NULL TO webpreview
@@ -395,8 +404,9 @@ LABEL dosaveas:
   RETURN 0
 END FUNCTION
 
-FUNCTION doOpen(tmpname,cname)
-  DEFINE tmpname,cname STRING
+
+FUNCTION open_prepare(tmpname)
+  DEFINE tmpname STRING
   DEFINE ans STRING
   IF (ans:=checkFileSave())=S_CANCEL THEN 
     RETURN tmpname
@@ -406,50 +416,127 @@ FUNCTION doOpen(tmpname,cname)
     CALL display_full(FALSE,FALSE)
   END IF
   CALL savelines()
-  IF cname IS NULL THEN
-    LET cname = fglped_filedlg()
-  END IF
-  IF cname IS NOT NULL THEN
-    IF NOT file_read(cname) THEN
-      CALL restorelines()
-      CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
-      LET cname=NULL
-    ELSE
-      CALL resetNewFile()
-      LET m_lastCRC=NULL
-      CALL savelines()
-      LET tmpname = setCurrFile(cname,tmpname)
-      CALL display_full(FALSE,FALSE)
-    END IF
-    IF NOT isPERFile(tmpname) THEN
-      CALL setPreviewActionActive(FALSE)
-    END IF
+  RETURN NULL
+END FUNCTION
+
+FUNCTION open_load(tmpname,cname)
+  DEFINE tmpname,cname STRING
+  IF NOT file_read(cname) THEN
+    CALL restorelines()
+    CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
+    LET cname=NULL
   ELSE
-    --CALL display_full()
+    CALL resetNewFile()
+    LET m_lastCRC=NULL
+    CALL savelines()
+    LET tmpname = setCurrFile(cname,tmpname)
+    CALL display_full(FALSE,FALSE)
+  END IF
+  IF NOT isPERFile(tmpname) THEN
+    CALL setPreviewActionActive(FALSE)
   END IF
   CALL hideOrShowPreview()
+  RETURN tmpname,cname
+END FUNCTION
+
+FUNCTION open_finish(tmpname,cname)
+  DEFINE tmpname,cname STRING
+  --note we compile unconditinally because the buffers may have changed
   CALL compileTmp(tmpname,cname IS NOT NULL)
   CALL flush_cm()
   RETURN tmpname
 END FUNCTION
 
-FUNCTION is4GLFile(fname)
-  DEFINE fname STRING
-  RETURN os.Path.extension(fname)=="4gl"
-END FUNCTION
-
-FUNCTION isPERFile(fname)
-  DEFINE fname,ext STRING
-  LET ext=os.Path.extension(fname)
-  IF ext IS NULL THEN
-    RETURN FALSE
+FUNCTION doOpen(tmpname,cname)
+  DEFINE tmpname,cname,oldname STRING
+  LET oldname=open_prepare(tmpname)
+  IF oldname IS NOT NULL THEN
+    RETURN oldname
   END IF
-  RETURN ext=="per"
+  IF cname IS NULL THEN
+    LET cname = fglped_filedlg()
+  END IF
+  IF cname IS NOT NULL THEN
+    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+  END IF
+  RETURN open_finish(tmpname,cname)
 END FUNCTION
 
-FUNCTION is4GLOrPerFile(fname)
-  DEFINE fname STRING
-  RETURN is4GLFile(fname) OR isPERFile(fname) 
+FUNCTION browse_demos(tmpname)
+  DEFINE tmpname,cname,oldname STRING
+  LET oldname=open_prepare(tmpname)
+  IF oldname IS NOT NULL THEN
+    RETURN oldname
+  END IF
+  LET cname=run_demos()
+  IF cname IS NOT NULL THEN
+    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+    LET m_cmRec.cmCommand="reload"
+  END IF
+  RETURN open_finish(tmpname,cname)
+END FUNCTION
+
+FUNCTION run_demos()
+  DEFINE cmd,dir,fulldir,cmdemo,home,tmp,line,lastline,cname STRING
+  DEFINE code INT
+  DEFINE ch base.Channel
+  LET dir=os.Path.dirname(arg_val(0))
+  LET fulldir=os.Path.fullPath(dir)
+  LET cmdemo=os.Path.join(fulldir,"cmdemo.42m")
+  {
+  LET home=fgl_getenv("CMHOME")
+  IF home IS NULL THEN
+    LET home=os.Path.join(dir,"home")
+  END IF
+  IF NOT os.Path.exists(home) AND NOT os.Path.isDirectory(home) THEN
+    MESSAGE sfmt("Can't find fiddle home:%1",home)
+    RETURN NULL
+  END IF
+  IF NOT os.Path.fullPath(os.Path.pwd())==os.Path.fullPath(home) THEN
+    LET cmd="cd ",home,"&&"
+  END IF
+  }
+  LET home=fgl_getenv("FGLDIR")
+  IF home IS NULL THEN
+    MESSAGE "Can't find FGLDIR"
+    RETURN NULL
+  END IF
+  LET home=os.Path.join(home,"demo")
+  IF NOT os.Path.exists(home) AND NOT os.Path.isDirectory(home) THEN
+    MESSAGE sfmt("Can't find fiddle home:%1",home)
+    RETURN NULL
+  END IF
+  IF NOT os.Path.fullPath(os.Path.pwd())==os.Path.fullPath(home) THEN
+    LET cmd="cd ",home,"&&"
+  END IF
+  LET tmp=os.Path.makeTempName()
+  LET cmd=cmd,"fglrun ",cmdemo," >",tmp," 2>&1"
+  DISPLAY "Run demo:",cmd
+  RUN cmd RETURNING code
+  IF code==0 THEN
+    LET ch=base.Channel.create()
+    TRY
+      CALL ch.openFile(tmp,"r")
+      WHILE (line:=ch.readLine()) IS NOT NULL
+        DISPLAY "line:",line
+        LET lastline=line
+      END WHILE
+      CALL ch.close()
+      IF lastline.getIndexOf("COPY2FIDDLE:",1)<>1 THEN
+        CALL myERROR("Can't find COPY2FIDDLE")
+      ELSE
+        LET cname=lastline.subString(13,lastline.getLength())
+        DISPLAY "!!!cname:",cname
+      END IF
+    CATCH
+      CALL myERROR(sfmt("read failed:%1",err_get(status)))
+    END TRY
+  ELSE
+    CALL myERROR(sfmt("Returned with code:%1",code))
+    RUN "cat "||tmp
+  END IF
+  CALL os.Path.delete(tmp) RETURNING code
+  RETURN cname
 END FUNCTION
 
 FUNCTION compileTmp(tmpname,jump_to_error)
@@ -556,34 +643,50 @@ END FUNCTION
 
 FUNCTION runprog(tmpname)
   DEFINE tmpname STRING
-  DEFINE srcname,cmdir,cmd,info,ts,tmp42m,dummy STRING
+  DEFINE srcname,cmdir,cmd,info,tmp42m,dummy,line STRING
+  DEFINE c base.Channel
   DEFINE code INT
-  DEFINE t TEXT
   CALL compileAllForms(IIF(m_IsFiddle,os.Path.pwd(),os.Path.dirname(tmpname)))
   IF (m_lastCompiledPER==tmpname) THEN 
     --need to cp the current tmp 42f fo the real 42f
     CALL copyTmp2Real42f(tmpname) RETURNING dummy
   END IF
   IF m_IsFiddle THEN
-    LET srcname="main.4gl"
+    LET srcname=".@main.4gl"
   ELSE
     LET srcname=m_lastCompiled4GL
   END IF
   LET tmp42m=srcname.subString(1,srcname.getLength()-4)
   LET cmdir=mydir(arg_val(0))
-  LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.txt 2>&1"
+  LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.out 2>&1"
   RUN cmd RETURNING code
-  LET info=sfmt("Returned code from %1:%2\n",tmp42m,code)
-  LOCATE t IN FILE "result.txt"
-  LET ts=t
-  LET info=info,ts
-  OPEN WINDOW output WITH FORM "fglcm_output"
-  DISPLAY info TO info
-  MENU 
-    ON ACTION cancel ATTRIBUTE(TEXT="Close")
-      EXIT MENU
-  END MENU
-  CLOSE WINDOW output
+  LET info=sfmt("Returned code from %1: %2\n",tmp42m,code)
+  LET c=base.Channel.create()
+  TRY
+    CALL c.openFile("result.out","r")
+    WHILE (line:=c.readLine()) IS NOT NULL
+      IF line=="fglrun sandbox enabled" THEN
+        CONTINUE WHILE
+      END IF
+      LET code=-1
+      LET info=info,line,"\n"
+    END WHILE
+    CALL c.close()
+  CATCH
+    LET code=256
+    LET info=info,sfmt("Failed to read result.txt:%1",err_get(status))
+  END TRY
+  IF code<>0 THEN
+    OPEN WINDOW output WITH FORM "fglcm_output"
+    DISPLAY info TO info
+    MENU 
+      ON ACTION cancel ATTRIBUTE(TEXT="Close")
+        EXIT MENU
+    END MENU
+    CLOSE WINDOW output
+  ELSE
+    CALL mymessage("Program ended with success and no output")
+  END IF
 END FUNCTION
 
 FUNCTION to42f(pername)
@@ -959,7 +1062,7 @@ FUNCTION compile_and_process(fname,jump_to_error)
   DEFINE compmess STRING
   LET compmess=compile_source(fname,0)
   IF compmess IS NOT NULL THEN
-    CALL process_compile_errors(jump_to_error)
+    CALL process_compile_errors(fname,jump_to_error)
   END IF
   RETURN compmess
 END FUNCTION
@@ -990,12 +1093,23 @@ FUNCTION buildCompileCmd(dirname,compOrForm,cparam,fname)
   RETURN cmd
 END FUNCTION
 
+FUNCTION regularFromTmpName(tmpname)
+  DEFINE tmpname,srcname STRING
+  DEFINE atidx INT
+  IF (atidx:=tmpname.getIndexOf(".@",1))>0 THEN
+    LET srcname=tmpname.subString(1,atidx-1),
+                tmpname.subString(atidx+2,tmpname.getLength())
+    RETURN srcname
+  END IF
+  RETURN tmpname
+END FUNCTION
+
 FUNCTION compile_source(fname,proposals)
   DEFINE fname STRING
   DEFINE proposals INT
-  DEFINE dirname,cmd,cmd1,mess,cparam,firstErrLine,line,srcname,compOrForm,tmpName STRING
+  DEFINE dirname,cmd,cmd1,mess,cparam,line,srcname,compOrForm,tmpName STRING
   DEFINE result STRING
-  DEFINE code,i,atidx,dummy INT
+  DEFINE code,i,dummy INT
   DEFINE isPER BOOLEAN
   LET dirname=mydir(fname)
   LET isPER=isPERFile(fname)
@@ -1015,7 +1129,7 @@ FUNCTION compile_source(fname,proposals)
   LET compOrForm=IIF(isPER,"fglform","fglcomp")
   LET cmd=buildCompileCmd(dirname,compOrForm,cparam,fname)
   CALL compile_arr.clear()
-  --DISPLAY "cmd=",cmd
+  DISPLAY "cmd=",cmd
   IF proposals THEN
     --DISPLAY "cmd=",cmd
   END IF
@@ -1040,20 +1154,15 @@ FUNCTION compile_source(fname,proposals)
       CALL file_get_output(cmd,compile_arr)
     ELSE
       CALL file_read_in_arr(tmpName,compile_arr)
+      RUN "cat "||tmpName
     END IF
-    IF (atidx:=fname.getIndexOf(".@",1))>0 THEN
-      LET srcname=fname.subString(1,atidx-1),fname.subString(atidx+2,fname.getLength())
-    ELSE
-      LET srcname=fname
-    END IF
+    LET srcname=regularFromTmpName(fname)
+    --DISPLAY "srcname=",srcname
     LET mess="compiling of '",srcname,"' failed:\n"
     FOR i=1 TO compile_arr.getLength()
       LET line=compile_arr[i]
-      IF (atidx:=line.getIndexOf(".@",1))>0 THEN
-        LET compile_arr[i]=line.subString(1,atidx-1),line.subString(atidx+2,line.getLength())
-      END IF
-      IF i=1 THEN
-        LET firstErrLine=compile_arr[i]
+      IF line.getIndexOf(".@",1)>0 THEN
+        LET compile_arr[i]=regularFromTmpName(line)
       END IF
       LET mess=mess,compile_arr[i],"\n"
     END FOR
@@ -1118,6 +1227,12 @@ FUNCTION err(errstr)
   EXIT PROGRAM 1
 END FUNCTION
 
+FUNCTION myERROR(errstr)
+  DEFINE errstr STRING
+  ERROR errstr
+  DISPLAY "ERROR:",errstr
+END FUNCTION
+
 FUNCTION setModified() 
   IF NOT m_modified THEN
     DISPLAY "setModified() TRUE"
@@ -1170,12 +1285,13 @@ END FUNCTION
 
 
 --collects the errors and jumps to the first one optionally
-FUNCTION process_compile_errors(jump_to_error)
+FUNCTION process_compile_errors(fname,jump_to_error)
+  DEFINE fname STRING
   DEFINE jump_to_error INT
   DEFINE idx,erridx INT
   DEFINE first BOOLEAN
   DEFINE firstcolon,secondcolon,thirdcolon,fourthcolon,fifthcolon,linenum,start INT
-  DEFINE line,col,col2,linenumstr,line2numstr STRING
+  DEFINE line,col,col2,linenumstr,line2numstr,errfile,regular STRING
   DEFINE isError BOOLEAN
   LET idx=1
   LET m_error_line=""
@@ -1192,6 +1308,14 @@ FUNCTION process_compile_errors(jump_to_error)
     END IF
     IF (firstcolon:=line.getIndexOf(":",start))>0 AND 
       ( (isError:=(line.getIndexOf(":error:",1)<>0)==TRUE) OR line.getIndexOf(":warning:",1)<>0 ) THEN
+      LET errfile=line.subString(1,firstcolon-1)
+      LET regular=regularFromTmpName(fname)
+      IF os.Path.baseName(errfile)<>os.Path.baseName(regular) THEN
+        DISPLAY "errfile:",errfile,",regular:",regular
+        DISPLAY "do not report warnings in other files yet to fglcm.js"
+        LET idx=idx+1
+        CONTINUE WHILE
+      END IF
       LET secondcolon=line.getIndexOf(":",firstcolon+1)
       LET thirdcolon=line.getIndexOf(":",secondcolon+1)
       LET fourthcolon=line.getIndexOf(":",thirdcolon+1)

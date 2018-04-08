@@ -438,7 +438,7 @@ function createEditor(ext) {
    //those keys are mostly for GBC because it can't handle them
    //via the TopMenu accelerators
    var extraKeys={
-          "Alt-C":function(cm) {
+          "Alt-N":function(cm) {
             sendChange(cm,"new_cm",false);
             return false;
           },
@@ -452,6 +452,14 @@ function createEditor(ext) {
           },
           "Alt-Q":function(cm) {
             sendChange(cm,"close_cm",false);
+            return false;
+          },
+          "Alt-L":function(cm) {
+            sendChange(cm,"gotoline_cm",false);
+            return false;
+          },
+          "Alt-F":function(cm) {
+            CodeMirror.commands.findPersistent(cm);
             return false;
           },
           "Cmd-F":function(cm) {
@@ -638,7 +646,8 @@ onICHostReady = function(version) {
      }
      //alert("data:"+data);
      if (o.full!==undefined) {
-       if (o.fileName!==undefined && o.fileName!=m_editor.FILENAME) {
+       if ((o.fileName!==undefined && o.fileName!=m_editor.FILENAME) ||
+            o.cmCommand=="reload" ) {
          console.log("would swap doc");
          var doc=new CodeMirror.Doc(o.full,m_editor.getMode());
          m_editor.swapDoc(doc);
