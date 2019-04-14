@@ -29,7 +29,12 @@ ifeq ($(UNAME),Linux)
   CRC32=./crc32
 endif
 
-all:: $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
+all:: .submodule $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
+
+.submodule:
+	git submodule init
+	git submodule update
+	touch $@
 
 cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m
 
@@ -81,7 +86,7 @@ clean_prog:
 	rm -f *.42? .*.42? home/*.*
 
 clean: clean_prog
-	rm -f ./crc32 $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js
+	rm -f .submodule ./crc32 $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js
 	cd $(CMDIR) && git clean -fdx && cd -
 	make -C webcomponents/fglcm clean
 
