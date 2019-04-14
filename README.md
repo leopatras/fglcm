@@ -11,7 +11,7 @@ It uses the codemirror editor javascript component to provide a decent editing e
 As a side effect it works in GDC too.
 
 # Prerequisites
-Gnu Make, nodejs and npm, under Linux a C-compiler is required
+Gnu Make, under Linux a C-compiler is required
 
 Call
 ```
@@ -51,3 +51,13 @@ $ FGLFIDDLE=1 ./cm main.4gl
 to let fglcm run in fiddle mode.
 It has a main.4gl and a main.per file by default,
 and shows a special toolbar to allow rapid switching between those 2 files.
+
+# Contributing
+requires nodejs and npm in to be able to build codemirror.js in case another
+code mirror version is wanted
+
+Call
+```
+$ make dist
+```
+to generate a new codemirror.js from the webcomponents/fglcm/codemirror sub module.

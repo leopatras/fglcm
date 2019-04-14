@@ -19,7 +19,7 @@ endef
 FGLCM_WC_DIR=./webcomponents/fglcm
 CMDIR=$(FGLCM_WC_DIR)/codemirror
 
-MODS=$(patsubst %.4gl,%.42m,$(wildcard *.4gl))
+#MODS=$(patsubst %.4gl,%.42m,$(wildcard *.4gl))
 FORMS=$(patsubst %.per,%.42f,$(wildcard *.per))
 
 UNAME:=$(shell uname)
@@ -29,17 +29,11 @@ ifeq ($(UNAME),Linux)
   CRC32=./crc32
 endif
 
-all:: $(CRC32) $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js $(CMDIR)/lib/codemirror.js cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
+all:: $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
 
 cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m
 
 fglped_md_filedlg.42m: fglped_fileutils.42m
-
-$(FGLCM_WC_DIR)/customMode/4gl.js:4gl.js updatekeywords.sh mix.awk
-	./updatekeywords.sh 4gl> $@
-
-$(FGLCM_WC_DIR)/customMode/per.js:per.js updatekeywords.sh mix.awk
-	./updatekeywords.sh per> $@
 
 ./crc32: crc32.c
 	cc -O2 -Wall -o $@ crc32.c
@@ -51,6 +45,9 @@ $(CMDIR)/lib/codemirror.js: $(CMDIR) #some trial and error is behind these lines
 	#cp rollup.config.js $(CMDIR)/
 	#cd $(CMDIR) && npm install rollup-plugin-buble && rollup -c
 	cd $(CMDIR) && npm install && ./node_modules/rollup/bin/rollup -c
+
+$(FGLCM_WC_DIR)/codemirror.js: $(CMDIR)/lib/codemirror.js
+	cp $(CMDIR)/lib/codemirror.js $(FGLCM_WC_DIR)/codemirror.js
 
 $(FGLDIR)/demo/demo.sch: 
 	$(MAKE) -C $(FGLDIR)/demo demo.sch
@@ -84,6 +81,12 @@ clean_prog:
 	rm -f *.42? .*.42? home/*.*
 
 clean: clean_prog
-	rm -f ./crc32 keywords.js $(FGLCM_WC_DIR)/customMode/4gl.js $(CMDIR)/lib/codemirror.js
+	rm -f ./crc32 $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js
 	cd $(CMDIR) && git clean -fdx && cd -
 	make -C webcomponents/fglcm clean
+
+dist: $(CMDIR)/lib/codemirror.js
+	cp $(CMDIR)/lib/codemirror.js $(FGLCM_WC_DIR)/codemirror.js
+
+distclean: clean
+	rm -f $(CMDIR)/lib/codemirror.js
