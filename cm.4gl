@@ -647,6 +647,7 @@ FUNCTION runprog(tmpname)
   DEFINE srcname,cmdir,cmd,info,tmp42m,dummy,line STRING
   DEFINE c base.Channel
   DEFINE code INT
+
   CALL compileAllForms(IIF(m_IsFiddle,os.Path.pwd(),os.Path.dirname(tmpname)))
   IF (m_lastCompiledPER==tmpname) THEN 
     --need to cp the current tmp 42f fo the real 42f
@@ -659,7 +660,11 @@ FUNCTION runprog(tmpname)
   END IF
   LET tmp42m=srcname.subString(1,srcname.getLength()-4)
   LET cmdir=mydir(arg_val(0))
-  LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.out 2>&1"
+  IF m_IsFiddle THEN
+    LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.out 2>&1"
+  ELSE
+    LET cmd=sfmt("fglrun %1 >result.out 2>&1",tmp42m)
+  END IF
   RUN cmd RETURNING code
   LET info=sfmt("Returned code from %1: %2\n",tmp42m,code)
   LET c=base.Channel.create()
@@ -1083,13 +1088,16 @@ END FUNCTION
 
 FUNCTION buildCompileCmd(dirname,compOrForm,cparam,fname)
   DEFINE dirname,compOrForm,cparam,fname STRING
-  DEFINE cmd STRING
+  DEFINE cmd,baseName STRING
+  DISPLAY "buildCompileCmd dirname:",dirname
+  LET baseName=os.Path.baseName(fname)
+  --we cd into the directory of the source
   IF file_on_windows() THEN
-    LET cmd=sfmt("set FGLDBPATH=%1;%%FGLDBPATH%% && %2 %3 -M -Wall %4 2>",
-            dirname,compOrForm,cparam,fname)
+    LET cmd=sfmt("cd \"%1\" && %2 %3 -M -Wall %4 2>",
+            dirname,compOrForm,cparam,baseName)
   ELSE
-    LET cmd=sfmt("export FGLDBPATH=\"%1\":$FGLDBPATH && %2 %3 -M -Wall \"%4\" 2>",
-            dirname,compOrForm,cparam,fname)
+    LET cmd=sfmt("cd \"%1\" && %2 %3 -M -Wall \"%4\" 2>",
+            dirname,compOrForm,cparam,baseName)
   END IF
   RETURN cmd
 END FUNCTION
@@ -1482,7 +1490,7 @@ FUNCTION file_write(srcfile)
   RETURN result
 END FUNCTION
 
-FUNCTION checkCRCSum(fname)
+FUNCTION getCRCSum(fname)
   DEFINE fname,s,cmd STRING
   DEFINE tok base.StringTokenizer
   DEFINE first BIGINT
@@ -1495,8 +1503,30 @@ FUNCTION checkCRCSum(fname)
   DISPLAY sfmt("%1 returned:%2",cmd,s)
   LET tok=base.StringTokenizer.create(s," ")
   LET first=tok.nextToken()
+  RETURN first
+END FUNCTION
+
+FUNCTION checkCRCSum(fname)
+  DEFINE fname STRING
+  DEFINE first,second BIGINT
+  DEFINE full STRING
+  LET first=getCRCSum(fname)
   IF first<>m_lastCRC THEN
-    CALL err(sfmt("crc cksum %1 != crc codemirror %2",first,m_lastCRC))
+    DISPLAY (sfmt("!!!!!!crc cksum %1 != crc codemirror %2",first,m_lastCRC))
+    --we fetch the whole editor content to repair the accident
+    CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getFullTextAndRepair"],[full])
+    CALL split_src(full)
+    IF NOT file_write_int(fname,"w") THEN
+      CALL err(sfmt("checkCRCSum: Can't re write:%1",fname))
+    END IF
+    LET second=getCRCSum(fname)
+    IF second<>m_lastCRC THEN
+      DISPLAY "full:"
+      DISPLAY full
+      DISPLAY "file:"
+      RUN "cat "||fname
+      CALL err(sfmt("crc cksum %1 != crc codemirror %2",second,m_lastCRC))
+    END IF
   END IF
   LET m_lastCRC=NULL
 END FUNCTION
@@ -1747,19 +1777,24 @@ FUNCTION split_src(src)
   DEFINE tok base.StringTokenizer
   DEFINE linenum INT
   CALL m_orglines.clear()
-  LET tok=base.StringTokenizer.create(src,"\n")
+  LET tok=base.StringTokenizer.createExt(src,"\n","\\",TRUE)
   LET linenum=1
   WHILE tok.hasMoreTokens()
     LET line=tok.nextToken()
-    IF line.getLength()==0 AND linenum>1 THEN
-      EXIT WHILE
-    END IF
-    LET m_orglines[linenum].line=line
+    LET m_orglines[linenum].line=IIF(line IS NULL," " CLIPPED,line)
     LET m_orglines[linenum].orgnum=linenum
     LET linenum=linenum+1
   END WHILE
+  LET linenum=m_orglines.getLength()
+  IF linenum>1 THEN
+    LET line=m_orglines[linenum].line
+    IF line.getLength()==0 THEN
+      --delete last line containing newline
+      CALL m_orglines.deleteElement(linenum)
+    END IF
+  END IF
 END FUNCTION
-
+{
 FUNCTION initCRC32Table()
   DEFINE c,cshift,n,magic,k INT
   LET magic=util.Integer.parseHexString("EDB88320")
@@ -1811,7 +1846,7 @@ FUNCTION crc32int(str)
   END IF
   RETURN big
 END FUNCTION
-
+}
 FUNCTION savelines()
   DEFINE i,len INT
   CALL m_savedlines.clear()

@@ -255,6 +255,14 @@ function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
   }
 }
 
+function getFullTextAndRepair()
+{
+  var editor=m_editor;
+  initLines(editor.getDoc());
+  var full=editor.getValue();
+  return full;
+}
+
 function renumberLines() {
   for(var i=m_lines.length-1;i>=0;i--) {
     var line=m_lines[i];
@@ -297,6 +305,9 @@ function fillValues(cm,o) {
   o.cursor2=cm.getCursor(false);
   //console.log("fillValues o:"+JSON.stringify(o));
 }*/
+function onChanges(cm,oarr) {
+  console.log("onChanges, m_inSetValue:"+m_inSetValue);
+}
 
 function onChange(cm,o) {
   //console.log("onChange, m_inSetValue:"+m_inSetValue+",o:"+JSON.stringify(o));
@@ -523,6 +534,7 @@ function createEditor(ext) {
   m_editor.EXTENSION=ext; //just glue our 4GL side extension var to the editor
   m_editor.setOption("fullScreen",true);
   m_editor.on("change",onChange);
+  m_editor.on("changes",onChanges);
   reset(m_editor);
   //m_editor.focus();
 }
