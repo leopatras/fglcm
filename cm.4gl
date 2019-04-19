@@ -16,7 +16,7 @@ DEFINE m_srcfile STRING
 DEFINE m_title STRING
 DEFINE compile_arr DYNAMIC ARRAY OF STRING
 DEFINE m_CRCProg STRING
-DEFINE m_CRCTable ARRAY[256] OF INTEGER
+--DEFINE m_CRCTable ARRAY[256] OF INTEGER
 DEFINE m_lastCRC BIGINT
 DEFINE m_modified BOOLEAN
 DEFINE m_IsNewFile BOOLEAN
@@ -30,7 +30,7 @@ DEFINE m_locationhref STRING
 DEFINE m_extURL STRING --external form viewer URL
 DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
-CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
+--CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
 
@@ -230,7 +230,7 @@ FUNCTION edit_source(fname)
         RETURN 1
       END IF
       IF ans="yes" THEN
-        IF NOT my_write(m_srcfile) THEN
+        IF NOT my_write(m_srcfile,FALSE) THEN
           RETURN 1
         END IF
       ELSE
@@ -280,7 +280,7 @@ LABEL action_close:
 
     ON ACTION complete
       CALL sync() 
-      IF NOT my_write(tmpname) THEN
+      IF NOT my_write(tmpname,TRUE) THEN
         EXIT INPUT
       END IF
       CALL initialize_when(TRUE)
@@ -368,7 +368,7 @@ LABEL action_save:
       IF isNewFile() THEN
         GOTO dosaveas
       END IF
-      IF NOT file_write(m_srcfile) THEN
+      IF NOT file_write(m_srcfile,FALSE) THEN
         CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
         --TODO: handle this worst case 
       ELSE
@@ -384,7 +384,7 @@ LABEL action_save:
       DISPLAY "saveas"
 LABEL dosaveas:
       IF (saveasfile:=fglped_saveasdlg(m_srcfile)) IS NOT NULL THEN
-        IF NOT file_write(saveasfile) THEN
+        IF NOT file_write(saveasfile,FALSE) THEN
           CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",saveasfile),IMG_ERROR)
         ELSE
           LET tmpname=setCurrFile(saveasfile,tmpname)
@@ -871,7 +871,6 @@ END FUNCTION
 FUNCTION syncInt(newVal)
   DEFINE newVal,line STRING
   DEFINE orgnum,idx,i,j,z,len,insertpos INT
-  --DEFINE crc BIGINT
   DEFINE cmRec CmType
   DISPLAY "newVal:",newVal
   IF newVal IS NULL THEN
@@ -907,7 +906,7 @@ FUNCTION syncInt(newVal)
     LET m_modified=TRUE
     LET idx=cmRec.removed[i].idx+1
     LET len=cmRec.removed[i].len
-    DISPLAY sfmt("delete lines:%1-%2",idx,idx+len-1)
+    --DISPLAY sfmt("delete lines:%1-%2",idx,idx+len-1)
     FOR j=1 TO len
       --DISPLAY "delete line:'",m_orglines[idx].line,"'"
       CALL m_orglines.deleteElement(idx)
@@ -1077,7 +1076,7 @@ FUNCTION saveAndCompile(fname,jump_to_error)
   DEFINE fname STRING
   DEFINE jump_to_error BOOLEAN
   DEFINE compmess STRING
-  IF file_write(fname) THEN
+  IF file_write(fname,TRUE) THEN
     LET compmess=compile_and_process(fname,jump_to_error)
   ELSE 
     LET m_error_line=sfmt("Can't write to:%1",fname)
@@ -1282,9 +1281,10 @@ FUNCTION checkChanged(src,copy2)
   RETURN 0
 END FUNCTION
 
-FUNCTION my_write(fname)
+FUNCTION my_write(fname,internal)
   DEFINE fname STRING
-  IF NOT file_write(fname) THEN
+  DEFINE internal BOOLEAN
+  IF NOT file_write(fname,internal) THEN
     CALL fgl_winmessage(S_ERROR,sfmt("Can't write to:%1",fname),IMG_ERROR)
     RETURN FALSE
   END IF
@@ -1440,9 +1440,10 @@ FUNCTION arr2String()
   RETURN result
 END FUNCTION
 
-FUNCTION file_write_int(srcfile,mode)
+FUNCTION file_write_int(srcfile,mode,internal)
   DEFINE srcfile STRING
   DEFINE mode STRING
+  DEFINE internal BOOLEAN
   DEFINE ch base.Channel
   DEFINE result,mystatus INT
   DEFINE idx,len INT
@@ -1458,13 +1459,14 @@ FUNCTION file_write_int(srcfile,mode)
     LET result=0
   ELSE
     LET len=m_orglines.getLength()
-    FOR idx=1 TO len
-      IF idx<>len THEN
+    FOR idx=1 TO len 
+      IF idx<>len OR NOT internal THEN
         --DISPLAY sfmt("writeLine %1 '%2'",idx,m_orglines[idx].line)
         CALL ch.writeLine(m_orglines[idx].line)
       ELSE
+        --internal and last line: avoid the newline problem
         LET line=m_orglines[idx].line
-        --DISPLAY sfmt("write last line %1 '%2'",idx,line)
+        DISPLAY sfmt("write last line %1 '%2'",idx,line)
         CALL ch.writeNoNL(line)
       END IF
     END FOR
@@ -1474,14 +1476,15 @@ FUNCTION file_write_int(srcfile,mode)
   RETURN result
 END FUNCTION
 
-FUNCTION file_write(srcfile)
+FUNCTION file_write(srcfile,internal)
   DEFINE srcfile STRING
+  DEFINE internal BOOLEAN
   DEFINE start DATETIME YEAR TO FRACTION(2)
   DEFINE result INT
   LET start=CURRENT
-  LET result=file_write_int(srcfile,"w")
-  DISPLAY "time for file_write:",CURRENT-start
-  IF m_lastCRC IS NOT NULL AND 
+  LET result=file_write_int(srcfile,"w",internal)
+  DISPLAY "time for file_write:",CURRENT-start,",m_lastCRC:",m_lastCRC
+  IF internal AND m_lastCRC IS NOT NULL AND 
       ( m_CRCProg IS NOT NULL OR file_on_mac() ) THEN
     LET start=CURRENT
     CALL checkCRCSum(srcfile)
@@ -1506,27 +1509,48 @@ FUNCTION getCRCSum(fname)
   RETURN first
 END FUNCTION
 
+--should be only called in the accident case
+--eats a full network roundtrip due to the frontcall
+FUNCTION getFullTextAndRepair(fname)
+  DEFINE fname STRING
+  DEFINE r RECORD
+    full STRING,
+    crc32 BIGINT
+  END RECORD
+  DEFINE ret STRING
+  DEFINE crc BIGINT
+  DEFINE ch base.Channel
+  LET m_LastCRC=NULL
+  CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getFullTextAndRepair"],[ret])
+  CALL util.JSON.parse(ret,r)
+  LET ch=base.Channel.create()
+  CALL ch.setDelimiter("")
+  CALL ch.openFile(fname,"w")
+  CALL ch.writeNoNL(r.full) 
+  CALL ch.close()
+  LET crc=getCRCSum(fname)
+  IF crc<>r.crc32 THEN
+    DISPLAY "full:"
+    DISPLAY "'",r.full,"\n'"
+    DISPLAY "file:"
+    RUN "cat '"||fname
+    DISPLAY "'"
+    CALL err(sfmt("crc cksum %1 != crc codemirror %2",crc,r.crc32))
+  END IF
+  CALL split_src(r.full)
+  DISPLAY "lines:",m_orglines.getLength(),",last:",m_orglines[m_orglines.getLength()].line
+END FUNCTION
+
 FUNCTION checkCRCSum(fname)
   DEFINE fname STRING
-  DEFINE first,second BIGINT
-  DEFINE full STRING
-  LET first=getCRCSum(fname)
-  IF first<>m_lastCRC THEN
-    DISPLAY (sfmt("!!!!!!crc cksum %1 != crc codemirror %2",first,m_lastCRC))
-    --we fetch the whole editor content to repair the accident
-    CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getFullTextAndRepair"],[full])
-    CALL split_src(full)
-    IF NOT file_write_int(fname,"w") THEN
-      CALL err(sfmt("checkCRCSum: Can't re write:%1",fname))
-    END IF
-    LET second=getCRCSum(fname)
-    IF second<>m_lastCRC THEN
-      DISPLAY "full:"
-      DISPLAY full
-      DISPLAY "file:"
-      RUN "cat "||fname
-      CALL err(sfmt("crc cksum %1 != crc codemirror %2",second,m_lastCRC))
-    END IF
+  DEFINE crc BIGINT
+  LET crc=getCRCSum(fname)
+  IF crc<>m_lastCRC THEN
+    RUN "cat "||fname
+    DISPLAY (sfmt("!!!!!!crc cksum %1 == crc codemirror %2",crc,m_lastCRC))
+    --CALL err(sfmt("!!!!!!crc cksum %1 == crc codemirror %2",crc,m_lastCRC))
+    --last resort:we fetch the whole editor content to repair the accident
+    CALL getFullTextAndRepair(fname)
   END IF
   LET m_lastCRC=NULL
 END FUNCTION
@@ -1581,7 +1605,7 @@ FUNCTION checkFileSave()
           RETURN S_CANCEL
         END IF
       END IF
-      CALL my_write(m_srcfile) RETURNING dummy
+      CALL my_write(m_srcfile,FALSE) RETURNING dummy
       IF m_IsNewFile THEN
         CALL mysetTitle()
         CALL resetNewFile()
