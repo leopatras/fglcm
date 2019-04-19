@@ -169,7 +169,8 @@ function sync() {
         }
       }
     } else if (line.state==e_states.modified && line.orgnum===undefined) {
-      lastInsertChunk.push({ line:line.line , orgnum: orgnum });      
+      line.line=editor.getDoc().getLine(i);
+      lastInsertChunk.push({ line:line.line , orgnum: i });
     }
   }
   if (lastInsertChunk.length>0) {
@@ -182,14 +183,16 @@ function sync() {
   } else {
     var t0 = performance.now();
     var full=editor.getValue();
+    var lineCount=editor.getDoc().lineCount();
+    var len=full.length;
     var crc=crc32(full);
     var t1 = performance.now();
     console.log("crc32 took " + (t1 - t0) + " milliseconds.")
     var o={
       //full: editor.getValue(), //enable for debugging
       crc:crc,
-      len:full.length,
-      lineCount:editor.getDoc().lineCount(),
+      len:len,
+      lineCount:lineCount,
       modified: modlines,
       removed:coalescedRemoves,
       inserts:inserts,
@@ -260,7 +263,7 @@ function getFullTextAndRepair()
   var editor=m_editor;
   initLines(editor.getDoc());
   var full=editor.getValue();
-  return full;
+  return JSON.stringify({full:full,crc32: crc32(full)});
 }
 
 function renumberLines() {
@@ -268,6 +271,7 @@ function renumberLines() {
     var line=m_lines[i];
     line.state=e_states.initial;
     line.orgnum=i;
+    delete line.inserted;
   }
 }
 function renumberOrgLines() {
@@ -307,18 +311,25 @@ function fillValues(cm,o) {
 }*/
 function onChanges(cm,oarr) {
   console.log("onChanges, m_inSetValue:"+m_inSetValue);
+  //the trace of the inserts is needed for the block sel ops
+  //(block sel and then hit Return)
+  var inserted=0;
+  for (var i=0;i<oarr.length;i++){
+    inserted=onChange(cm,oarr[i],inserted);
+  }
 }
 
-function onChange(cm,o) {
+function onChange(cm,o,inserted) {
   //console.log("onChange, m_inSetValue:"+m_inSetValue+",o:"+JSON.stringify(o));
-  console.log("onChange, m_inSetValue:"+m_inSetValue);
+  console.log("onChange, m_inSetValue:"+m_inSetValue+",inserted:"+inserted);
 
   if (m_inSetValue) { return;}
   var fromLine=o.from.line;
   var toLine=o.to.line;
   var doc=cm.getDoc();
-  for (var i=fromLine;i<=toLine;i++) {
-    console.log("line "+i+" changed");
+  var mlen=m_lines.length;
+  for (var i=fromLine;i<=toLine&&i<mlen;i++) {
+    //console.log("line "+i+" changed");
     m_lines[i].state=e_states.modified;
     m_lines[i].line=doc.getLine(i);
   }
@@ -331,8 +342,10 @@ function onChange(cm,o) {
   var orginserts=o.text;
   var len=orginserts.length;
   if (len>1) {
+    fromLine+=inserted;
     var ilen=len-1;
     for(i=1;i<=ilen;i++) {
+      inserted+=1;
       m_lines.splice(fromLine+i,0,
         { state:e_states.modified, line:doc.getLine(fromLine+i), inserted:true });
     }
@@ -360,9 +373,10 @@ function onChange(cm,o) {
       console.log("data pending after onChange:set dolater");
       m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
     } else {
-      m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?200:500);
+      m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?100:1000);
     }
   }
+  return inserted;
 }
 
 function prepareRemoves(orgremoved,fromLine,toLine) {
@@ -533,7 +547,6 @@ function createEditor(ext) {
   var doc=new CodeMirror.Doc("", mode );
   m_editor.EXTENSION=ext; //just glue our 4GL side extension var to the editor
   m_editor.setOption("fullScreen",true);
-  m_editor.on("change",onChange);
   m_editor.on("changes",onChanges);
   reset(m_editor);
   //m_editor.focus();
