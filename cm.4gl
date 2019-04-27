@@ -30,6 +30,7 @@ DEFINE m_locationhref STRING
 DEFINE m_extURL STRING --external form viewer URL
 DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
+DEFINE m_InitSeen BOOLEAN
 --CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
@@ -85,27 +86,57 @@ TYPE CmType RECORD
       END RECORD,
       message STRING,
       severity STRING
-    END RECORD
+    END RECORD,
+    flushTimeout INT
 END RECORD
 
 DEFINE m_cmRec CmType
 DEFINE m_cm STRING
-
+DEFINE m_arg_0 STRING
+DEFINE m_args DYNAMIC ARRAY OF STRING
 MAIN
+  DEFINE i INT
+  FOR i=1 TO num_args()
+    LET m_args[i]=arg_val(i)
+  END FOR
+  LET m_arg_0=arg_val(0)
+  CALL fglcm_main()
+END MAIN
+
+FUNCTION setArgs(arg0,args)
+  DEFINE arg0 STRING
+  DEFINE args DYNAMIC ARRAY OF STRING
+  LET m_arg_0=arg0
+  LET m_args=args
+END FUNCTION
+
+FUNCTION fglcm_main()
   DEFINE result INT
   LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
   CALL ui.Interface.loadStyles("fglcm")
   --CALL initCRC32Table()
   CALL loadKeywords()
   LET m_lastCRC=NULL
-  LET m_CRCProg=os.Path.fullPath(myjoin(mydir(arg_val(0)),"crc32"))
+  LET m_CRCProg=os.Path.fullPath(myjoin(mydir(my_arg_val(0)),"crc32"))
   DISPLAY "m_CRCProg:",m_CRCProg
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg=NULL
   END IF
-  LET result=edit_source(arg_val(1))
+  LET result=edit_source(my_arg_val(1))
   EXIT PROGRAM result
-END MAIN
+END FUNCTION
+
+FUNCTION my_arg_val(index)
+  DEFINE index INT
+  IF index==0 THEN
+    RETURN m_arg_0
+  ELSE
+    IF index>=1 AND index <= m_args.getLength() THEN
+      RETURN m_args[index]
+    END IF
+  END IF
+  RETURN NULL
+END FUNCTION
 
 FUNCTION checkFiddleBar()
   DEFINE f ui.Form
@@ -256,6 +287,10 @@ FUNCTION edit_source(fname)
       CALL compileTmp(tmpname,TRUE)
       CALL display_full(FALSE,FALSE)
       CALL flush_cm()
+    ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
+      LET m_InitSeen=TRUE
+      DISPLAY "init seen"
+      DISPLAY m_cm TO cm
 
     ON ACTION run
       CALL runprog(tmpname)
@@ -481,7 +516,7 @@ FUNCTION run_demos()
   DEFINE cmd,dir,fulldir,cmdemo,home,tmp,line,lastline,cname STRING
   DEFINE code INT
   DEFINE ch base.Channel
-  LET dir=os.Path.dirname(arg_val(0))
+  LET dir=os.Path.dirname(my_arg_val(0))
   LET fulldir=os.Path.fullPath(dir)
   LET cmdemo=myjoin(fulldir,"cmdemo.42m")
   {
@@ -616,7 +651,7 @@ FUNCTION writeXCF(gasappdatadir,appname)
     '    <PATH>%1</PATH>\n'||
     '    <MODULE>%2</MODULE>\n'||
     '  </EXECUTION>\n'||
-    '</APPLICATION>' ,mydir(arg_val(0)),appname)
+    '</APPLICATION>' ,mydir(my_arg_val(0)),appname)
   LET c=base.Channel.create()
   TRY
     CALL c.openFile(xcfname,"w")
@@ -659,7 +694,7 @@ FUNCTION runprog(tmpname)
     LET srcname=m_lastCompiled4GL
   END IF
   LET tmp42m=srcname.subString(1,srcname.getLength()-4)
-  LET cmdir=mydir(arg_val(0))
+  LET cmdir=mydir(my_arg_val(0))
   IF m_IsFiddle THEN
     LET cmd=myjoin(cmdir,"startfglrun.sh")," ",os.Path.pwd()," ",tmp42m,".42m >result.out 2>&1"
   ELSE
@@ -860,6 +895,10 @@ FUNCTION fcsync() --called if our topmenu fired an action
   --the 3.00 GDC too, so we have to explicitly flush the component 
   --the drawback: this costs an additional client server round trip
   DEFINE newVal STRING
+  IF NOT m_InitSeen THEN
+    DISPLAY "fcsync:no init seen yet"
+    RETURN
+  END IF
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","fcsync"],[newVal])
   CALL syncInt(newVal)
 END FUNCTION
@@ -973,9 +1012,13 @@ FUNCTION syncInt(newVal)
 END FUNCTION
 
 FUNCTION flush_cm()
+  DEFINE flushTimeout INT
   LET m_cmdIdx=m_cmdIdx+1
   LET m_cmRec.cmdIdx=m_cmdIdx
   LET m_cmRec.vm=TRUE
+  LET flushTimeout=fgl_getenv("FGLCM_FLUSHTIMEOUT")
+  DISPLAY "flushTiout is:",flushTimeout
+  LET m_cmRec.flushTimeout=IIF((flushTimeout IS NULL) OR flushTimeout=="0",1000,flushTimeout)
   LET m_cm=util.JSON.stringifyOmitNulls(m_cmRec)
   IF m_cm.getLength()>140 THEN
     DISPLAY sfmt("flush:%1...%2",m_cm.subString(1,70),m_cm.subString(m_cm.getLength()-60,m_cm.getLength()))
@@ -1251,18 +1294,18 @@ END FUNCTION
 FUNCTION checkChangedArray()
   DEFINE savelen,len,i INT
   IF m_modified==FALSE THEN
-    DISPLAY "checkChangedArray() no mod"
+    --DISPLAY "checkChangedArray() no mod"
     RETURN FALSE
   END IF
   LET savelen=m_savedlines.getLength()
   LET len=m_orglines.getLength()
   IF savelen<>len THEN
-    DISPLAY SFMT("savelen:%1 len:%2",savelen,len)
+    --DISPLAY SFMT("savelen:%1 len:%2",savelen,len)
     RETURN TRUE
   END IF
   FOR i=1 TO len
     IF checkChanged(m_savedlines[i],m_orglines[i].line) THEN
-      DISPLAY sfmt("line:%1 differs '%2'<>'%3'",i,m_savedlines[i],m_orglines[i].line)
+      --DISPLAY sfmt("line:%1 differs '%2'<>'%3'",i,m_savedlines[i],m_orglines[i].line)
       RETURN TRUE
     END IF
   END FOR
@@ -1906,7 +1949,7 @@ END FUNCTION
 FUNCTION loadKeywordsFor(vimmode,mode)
   DEFINE vimmode,mode,vimfile,vimfile2 STRING
   DEFINE sep,fgldir,cmdir,templ STRING
-  LET cmdir=mydir(arg_val(0))
+  LET cmdir=mydir(my_arg_val(0))
   LET templ=myjoin(cmdir,sfmt("%1.js",mode))
   LET sep=os.Path.separator()
   LET fgldir=fgl_getenv("FGLDIR")

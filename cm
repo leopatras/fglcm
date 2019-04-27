@@ -14,6 +14,7 @@ fullname () {
 
 SCRIPT_NAME=`fullname $0`
 FGLCMDIR=`dirname $SCRIPT_NAME` 
+export LANG="en_US.UTF-8"
 #we recompile everything always: hence avoid version clashes
 make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLCMDIR

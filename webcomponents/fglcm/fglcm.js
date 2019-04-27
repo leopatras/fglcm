@@ -33,6 +33,12 @@ var m_editorId=null;
 var m_dataPending=false;
 var m_updateOnData=null;
 var m_prevFocus=null;
+var m_fglcm_init=false;
+//for debugging get4GLHint
+//var m_lastseen = performance.now(); 
+var m_repairCount = 0;
+//can be set via FGLCM_FLUSHTIMEOUT
+var m_flushTimeout = 1000;
 
 function initCRCTable(){
   var c;
@@ -261,9 +267,61 @@ function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
 function getFullTextAndRepair()
 {
   var editor=m_editor;
+  m_repairCount++;
   initLines(editor.getDoc());
   var full=editor.getValue();
   return JSON.stringify({full:full,crc32: crc32(full)});
+}
+
+function qaGetFullText()
+{
+  var editor=m_editor;
+  return editor.getValue();
+}
+
+function qaGetInit()
+{
+  return m_fglcm_init?1:0;
+}
+
+function qaGetDataPending()
+{
+  return m_dataPending?1:0;
+}
+
+function qaGetCompletionId()
+{
+  return m_completionId!==null?m_completionId:"(null)";
+}
+
+function qaGetDOMFocus()
+{
+  var el=document.activeElement;
+  if (!el) {
+    return '{tagName:"none", className:"none", id:"none"}';
+  }
+  var ret='{tagName:"'+el.tagName+'", className:"'+el.className+'", id:"'+el.id+'"}';
+  return ret;
+}
+
+function qaGetRepairCount()
+{
+  return m_repairCount;
+}
+
+function isVisible(el) {
+  var style = window.getComputedStyle(el);
+  return (style.display !== 'none')
+}
+
+function qaGetHintsVisible()
+{
+  var arr=document.getElementsByClassName("CodeMirror-hints");
+  console.log("arr.length:",arr.length);
+  if (arr.length===1) {
+    return isVisible(arr[0])?1:0;
+  }
+  return 0;
 }
 
 function renumberLines() {
@@ -373,7 +431,7 @@ function onChange(cm,o,inserted) {
       console.log("data pending after onChange:set dolater");
       m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
     } else {
-      m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?100:1000);
+      m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?100:m_flushTimeout);
     }
   }
   return inserted;
@@ -447,6 +505,34 @@ function fIs4GLOrPer(ext) {
   return (ext=="4gl" || ext=="per");
 }
 
+function lineEmptyUntilCursor(cm)
+{
+  var doc=cm.getDoc();
+  var cursor=doc.getCursor();
+  var linenum=cursor.line;
+  var linepart=doc.getLine(linenum).substr(0,cursor.ch);
+  console.log("line part is "+linepart.length+ " spaces");
+  return /^\s*$/.test(linepart);
+}
+
+function myComplete(cm,cleverTab)
+{
+  //m_state="complete";
+  if (m_dataPending) {
+    console.log("Tab seen,data pending in completion");
+    m_updateOnData="complete";
+  } else {
+    console.log("Tab seen,sending completion");
+    if (cleverTab && lineEmptyUntilCursor(cm)) {
+      console.log("insertSoftTab")
+      CodeMirror.commands.insertSoftTab(cm);
+    } else {
+      clearUpdateTimer();
+      sendChange(cm,"complete",false);
+    }
+  }
+}
+
 function createEditor(ext) {
    var ed=null;
    if (m_editor) {
@@ -454,7 +540,9 @@ function createEditor(ext) {
      ed=document.getElementById(m_editorId);
      ed.parentNode.removeChild(ed);
    }
-   ed=document.createElement("TEXTAREA"); 
+   ed=document.createElement("TEXTAREA");
+   ed.className="fglcm_editor";
+   ed.id="editor";
    m_instance++;
    m_editorId="editor"+m_instance;
    ed.id=m_editorId;
@@ -500,16 +588,13 @@ function createEditor(ext) {
    if (is4GLOrPer) {
      lint = { 'getAnnotations': myAnnotations, 'lintOnChange': false };
      extraKeys["Tab"] = function(cm) {
-            //m_state="complete";
-            if (m_dataPending) {
-              console.log("Tab seen,data pending in completion");
-              m_updateOnData="complete";
-            } else {
-              console.log("Tab seen,sending completion");
-              sendChange(cm,"complete",false);
-            }
-            return false;
-       };
+       myComplete(cm,true);//clever tab
+       return false;
+     };
+     extraKeys["Ctrl-Space"]= function(cm) {
+       myComplete(cm,false);//always completes
+       return false;
+     }
    }
    if (ext=="js") {
       extraKeys["Tab"] = "autocomplete";
@@ -563,6 +648,15 @@ function isInPropArr(txt) {
 }
 
 function get4GLHint(cm, c) {
+   /*
+   var t1 = performance.now();
+   var diff= t1-m_lastseen;
+   console.log("diff:"+diff);
+   if (diff<1000) {
+     //alert("get4GLHint");
+   }
+   m_lastseen=t1;
+   */
    var cursor=cm.getCursor();
    var word = cm.findWordAt(cursor);
    console.log("word:"+JSON.stringify(word));
@@ -653,6 +747,9 @@ onICHostReady = function(version) {
        //checkUpdateOnData();
        return;
      } 
+     if (o.flushTimeout!==undefined) {
+       m_flushTimeout=o.flushTimeout;
+     }
      m_dataPending=false; 
      if (o.extension!==undefined) {
        if (m_editor.EXTENSION!=o.extension) {
@@ -666,8 +763,9 @@ onICHostReady = function(version) {
        m_proparr=o.proparr; //we preserve the completion list
        clearCompletionAliveTimer();
        m_completionId = setTimeout(function() {
+           m_completionId = null;
            m_editor.showHint({hint: get4GLHint});
-         },50);
+         },10);
      }
      //alert("data:"+data);
      if (o.full!==undefined) {
@@ -701,7 +799,13 @@ onICHostReady = function(version) {
      } else if (o.cmCommand=="replace") {
        CodeMirror.commands.replace(m_editor);
      }
-     checkUpdateOnData();
+     if (m_updateOnData===null && m_fglcm_init===false) {
+       //initial roundtrip
+       m_fglcm_init=true;
+       gICAPI.Action("fglcm_init");
+     } else {
+       checkUpdateOnData();
+     }
      //m_editor.focus();
    }
 
