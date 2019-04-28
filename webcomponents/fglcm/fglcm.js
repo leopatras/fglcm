@@ -39,6 +39,7 @@ var m_fglcm_init=false;
 var m_repairCount = 0;
 //can be set via FGLCM_FLUSHTIMEOUT
 var m_flushTimeout = 1000;
+var m_lastChanges=null;
 
 function initCRCTable(){
   var c;
@@ -267,10 +268,12 @@ function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
 function getFullTextAndRepair()
 {
   var editor=m_editor;
-  m_repairCount++;
-  initLines(editor.getDoc());
   var full=editor.getValue();
-  return JSON.stringify({full:full,crc32: crc32(full)});
+  m_repairCount++;
+  var doc=editor.getDoc();
+  var cnt=doc.lineCount();
+  initLines(doc);
+  return JSON.stringify({full:full,crc32: crc32(full),lastChanges:JSON.stringify(m_lastChanges),lineCount:cnt});
 }
 
 function qaGetFullText()
@@ -372,6 +375,7 @@ function onChanges(cm,oarr) {
   //the trace of the inserts is needed for the block sel ops
   //(block sel and then hit Return)
   var inserted=0;
+  m_lastChanges=oarr;
   for (var i=0;i<oarr.length;i++){
     inserted=onChange(cm,oarr[i],inserted);
   }

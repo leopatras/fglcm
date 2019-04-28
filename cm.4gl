@@ -32,6 +32,8 @@ DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
 DEFINE m_InitSeen BOOLEAN
 --CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
+DEFINE m_recents DYNAMIC ARRAY OF STRING
+DEFINE m_lastEditorInstruction STRING
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
 
@@ -117,13 +119,18 @@ FUNCTION fglcm_main()
   --CALL initCRC32Table()
   CALL loadKeywords()
   LET m_lastCRC=NULL
-  LET m_CRCProg=os.Path.fullPath(myjoin(mydir(my_arg_val(0)),"crc32"))
+  LET m_CRCProg=os.Path.fullPath(selfpathjoin("crc32"))
   DISPLAY "m_CRCProg:",m_CRCProg
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg=NULL
   END IF
   LET result=edit_source(my_arg_val(1))
   EXIT PROGRAM result
+END FUNCTION
+
+FUNCTION selfpathjoin(what)
+  DEFINE what STRING
+  RETURN myjoin(mydir(my_arg_val(0)),what)
 END FUNCTION
 
 FUNCTION my_arg_val(index)
@@ -387,10 +394,9 @@ LABEL action_new:
       CALL fcsync()
 LABEL action_open:
       LET tmpname=doOpen(tmpname,NULL)
-
-    --ON ACTION sync
-    --  CALL sync()
-
+    ON ACTION open_from_picklist
+      CALL fcsync()
+      LET tmpname=openFromPickList()
     ON ACTION save_cm ATTRIBUTE(DEFAULTVIEW=NO)
       CALL sync()
       DISPLAY "save_cm"
@@ -492,6 +498,50 @@ FUNCTION doOpen(tmpname,cname)
   IF cname IS NULL THEN
     LET cname = fglped_filedlg()
   END IF
+  IF cname IS NOT NULL THEN
+    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+  END IF
+  RETURN open_finish(tmpname,cname)
+END FUNCTION
+
+FUNCTION displayPickList()
+  DEFINE entry,el,pwd,full STRING
+  DEFINE i INT
+  DEFINE arr DYNAMIC ARRAY OF STRING
+  LET full=os.Path.fullPath(m_srcfile)
+  LET pwd=os.Path.pwd()
+  FOR i=1 TO m_recents.getLength()
+    IF NOT full.equals(m_recents[i]) THEN
+      LET el=m_recents[i]
+      IF pwd.equals(os.Path.dirName(el)) THEN
+        LET el=os.Path.baseName(el)
+      END IF
+      LET arr[arr.getLength()+1]=el
+    END IF
+  END FOR
+  DISPLAY "m_recents:",util.JSON.stringify(m_recents),",arr:",util.JSON.stringify(arr)
+  IF arr.getLength()==0 THEN
+    CALL fgl_winMessage("fglcm","There are no alternate files you did edit previously","info")
+    RETURN NULL
+  END IF
+  OPEN WINDOW fglcm_picklist WITH FORM "fglcm_picklist" ATTRIBUTE(STYLE="dialog")
+  MESSAGE "Pick one of the files you did edit previously and hit <Return>"
+  DISPLAY ARRAY arr TO pick.*
+    ON ACTION accept
+      LET entry=arr[arr_curr()]
+      EXIT DISPLAY
+  END DISPLAY
+  CLOSE WINDOW fglcm_picklist
+  RETURN entry
+END FUNCTION
+
+FUNCTION openFromPickList()
+  DEFINE tmpname,cname,oldname STRING
+  LET oldname=open_prepare(tmpname)
+  IF oldname IS NOT NULL THEN
+    RETURN oldname
+  END IF
+  LET cname = displayPickList()
   IF cname IS NOT NULL THEN
     CALL open_load(tmpname,cname) RETURNING tmpname,cname
   END IF
@@ -917,6 +967,7 @@ FUNCTION syncInt(newVal)
     CALL fgl_winmessage("Error","syncInt was called with NULL","error")
     RETURN 
   END IF
+  LET m_lastEditorInstruction=newVal
   CALL util.JSON.parse(newVal,cmRec)
   DISPLAY "cm:",util.JSON.stringify(cmRec)
   DISPLAY ">>----"
@@ -1558,19 +1609,36 @@ FUNCTION getFullTextAndRepair(fname)
   DEFINE fname STRING
   DEFINE r RECORD
     full STRING,
-    crc32 BIGINT
+    crc32 BIGINT,
+    lastChanges STRING,
+    lineCount INT
   END RECORD
-  DEFINE ret STRING
+  DEFINE ret,bak,last STRING
   DEFINE crc BIGINT
-  DEFINE ch base.Channel
   LET m_LastCRC=NULL
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getFullTextAndRepair"],[ret])
   CALL util.JSON.parse(ret,r)
-  LET ch=base.Channel.create()
-  CALL ch.setDelimiter("")
-  CALL ch.openFile(fname,"w")
-  CALL ch.writeNoNL(r.full) 
-  CALL ch.close()
+  LET last=m_lastEditorInstruction,"\ncodemirror lastChanges:",r.lastChanges
+  CALL writeStringToFile("lastChanges.txt",last)
+  LET bak=sfmt("%1.bak",fname)
+  RUN sfmt('cp "%1" "%2"',fname,bak) 
+  CALL writeStringToFile(fname,r.full)
+  WHILE TRUE
+    MENU ATTRIBUTE(STYLE="dialog",COMMENT="CRC error")
+      COMMAND "vimdiff WC vs server"
+        RUN sfmt('vimdiff "%1" "%2"',fname,bak)
+      COMMAND "View WC side"
+        RUN sfmt('fglrun "%1" "%2"',selfpathjoin("cm.42m"),fname)
+      COMMAND "View server side"
+        RUN sfmt('fglrun "%1" "%2"',selfpathjoin("cm.42m"),bak)
+      COMMAND "View last changes"
+        RUN sfmt('fglrun "%1" lastChanges.txt',selfpathjoin("cm.42m"))
+      COMMAND "Continue Editing"
+        EXIT WHILE
+      COMMAND "Exit fglcm"
+        EXIT PROGRAM 1
+    END MENU    
+  END WHILE
   LET crc=getCRCSum(fname)
   IF crc<>r.crc32 THEN
     DISPLAY "full:"
@@ -1578,10 +1646,28 @@ FUNCTION getFullTextAndRepair(fname)
     DISPLAY "file:"
     RUN "cat '"||fname
     DISPLAY "'"
-    CALL err(sfmt("crc cksum %1 != crc codemirror %2",crc,r.crc32))
+    CALL err(sfmt("getFullTextAndRepair crc cksum %1 != crc codemirror %2",crc,r.crc32))
   END IF
   CALL split_src(r.full)
-  DISPLAY "lines:",m_orglines.getLength(),",last:",m_orglines[m_orglines.getLength()].line
+  DISPLAY "lines:",m_orglines.getLength(),",last:",m_orglines[m_orglines.getLength()].line,",wc lineCount:",r.lineCount
+  IF m_orglines.getLength()<>r.lineCount THEN
+    CALL err(sfmt("getFullTextAndRepair m_orglines.getLength:%1, r.lineCount:%2",
+              m_orglines.getLength(),r.lineCount))
+  END IF
+END FUNCTION
+
+FUNCTION writeStringToFile(fname,s)
+  DEFINE ch base.Channel
+  DEFINE fname,s STRING
+  LET ch=base.Channel.create()
+  CALL ch.setDelimiter("")
+  TRY
+  CALL ch.openFile(fname,"w")
+  CATCH
+    CALL err(sfmt("writeStringToFile(%1) failed:%2",fname,err_get(status)))
+  END TRY
+  CALL ch.writeNoNL(s) 
+  CALL ch.close()
 END FUNCTION
 
 FUNCTION checkCRCSum(fname)
@@ -1591,7 +1677,6 @@ FUNCTION checkCRCSum(fname)
   IF crc<>m_lastCRC THEN
     RUN "cat "||fname
     DISPLAY (sfmt("!!!!!!crc cksum %1 == crc codemirror %2",crc,m_lastCRC))
-    --CALL err(sfmt("!!!!!!crc cksum %1 == crc codemirror %2",crc,m_lastCRC))
     --last resort:we fetch the whole editor content to repair the accident
     CALL getFullTextAndRepair(fname)
   END IF
@@ -1708,10 +1793,30 @@ END FUNCTION
 FUNCTION setCurrFile(fname,tmpname) --sets m_srcfile
   DEFINE fname,tmpname STRING
   LET m_srcfile=fname
+  CALL addToRecents()
   CALL delete_tmpfiles(tmpname)
   LET tmpname = getTmpFileName(m_srcfile)
   CALL mysetTitle()
   RETURN tmpname
+END FUNCTION
+
+FUNCTION addToRecents()
+  DEFINE i INT
+  DEFINE found INT
+  DEFINE fullPath STRING
+  LET fullPath=os.Path.fullPath(m_srcfile)
+  FOR i=1 TO m_recents.getLength()
+    IF fullPath.equals(m_recents[i]) THEN
+      LET found=i
+      EXIT FOR
+    END IF
+  END FOR
+  IF found>0 THEN
+    CALL m_recents.deleteElement(found)
+  END IF
+  --insert in the head of recent list
+  CALL m_recents.insertElement(1)
+  LET m_recents[1]=fullPath
 END FUNCTION
 
 --computes the temporary .per file name to work with during our manipulations
@@ -1852,6 +1957,7 @@ FUNCTION split_src(src)
     LET m_orglines[linenum].orgnum=linenum
     LET linenum=linenum+1
   END WHILE
+  {
   LET linenum=m_orglines.getLength()
   IF linenum>1 THEN
     LET line=m_orglines[linenum].line
@@ -1860,6 +1966,7 @@ FUNCTION split_src(src)
       CALL m_orglines.deleteElement(linenum)
     END IF
   END IF
+  }
 END FUNCTION
 {
 FUNCTION initCRC32Table()

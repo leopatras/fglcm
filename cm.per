@@ -7,6 +7,7 @@ ACTION DEFAULTS
   ACTION preview ( Text="&Full Screen Preview", COMMENT="Previews the current form if it is compilable", ACCELERATOR=F6,IMAGE="fa-expand")
   --ACTION viewerr ( Text="View &Error", COMMENT="compiles and refreshes the form,jumps immediately to the first error", ACCELERATOR=F6)
   ACTION open ( Text="&Open...", COMMENT="Opens an existing file", ACCELERATOR=ALT-O,ACCELERATOR2=CONTROL-O,DEFAULTVIEW=NO)
+  ACTION open_from_picklist ( Text="&Pick from recently used files...", COMMENT="Opens from the recent files", ACCELERATOR=ALT-P,ACCELERATOR2=CONTROL-P,DEFAULTVIEW=NO)
   ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=ALT-S,ACCELERATOR2=CONTROL-S,DEFAULTVIEW=NO)
   ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
   --ACTION jump_to_def( TEXT="Jump to Definition")
@@ -24,6 +25,7 @@ TOPMENU
     COMMAND new (TEXT="New")
     --COMMAND newfromwiz
     COMMAND open
+    COMMAND open_from_picklist
     SEPARATOR
     COMMAND close
     COMMAND save 
@@ -88,10 +90,58 @@ GRID
 [                                                           |                                                      ]
 [                                                           |                                                      ]
 [                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
+[                                                           |                                                      ]
 [info                                                                                                              ]
 }
 END
 ATTRIBUTES
-WEBCOMPONENT cm=FORMONLY.cm,COMPONENTTYPE="fglcm",STRETCH=BOTH;
+WEBCOMPONENT cm=FORMONLY.cm,COMPONENTTYPE="fglcm",STRETCH=BOTH,SIZEPOLICY=FIXED;
 WEBCOMPONENT webpreview=FORMONLY.webpreview,STRETCH=BOTH,HIDDEN;
 LABEL info=FORMONLY.info;
