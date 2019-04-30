@@ -9,6 +9,7 @@ ACTION DEFAULTS
   ACTION open ( Text="&Open...", COMMENT="Opens an existing file", ACCELERATOR=ALT-O,ACCELERATOR2=CONTROL-O,DEFAULTVIEW=NO)
   ACTION open_from_picklist ( Text="&Pick from recently used files...", COMMENT="Opens from the recent files", ACCELERATOR=ALT-P,ACCELERATOR2=CONTROL-P,DEFAULTVIEW=NO)
   ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=ALT-S,ACCELERATOR2=CONTROL-S,DEFAULTVIEW=NO)
+  ACTION compile (TEXT="Compile", COMMENT="Compiles the module and jumps to the first issue" ,ACCELERATOR=F4,ACCELERATOR2=ALT-C)
   ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
   --ACTION jump_to_def( TEXT="Jump to Definition")
   ACTION find ( TEXT="Search..." ,COMMENT ="Opens a dialog to search text",ACCELERATOR=ALT-F,ACCELERATOR2=CONTROL-F,IMAGE="find" )
@@ -54,6 +55,7 @@ TOPMENU
   --  COMMAND toggle_toolbar 
   --END
   GROUP(TEXT="Product")
+      COMMAND compile
       COMMAND run
       SEPARATOR
       COMMAND preview

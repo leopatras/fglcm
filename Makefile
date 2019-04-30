@@ -1,4 +1,5 @@
 .SUFFIXES: .per .42f .4gl .42m .msg .img 
+FGLCM_EXT_DIR=./ext
 
 .msg.iem:
 	fglmkmsg $< $@
@@ -7,7 +8,7 @@
 	fglform -M $<
 
 %.42m: %.4gl 
-	fglcomp -r -M -Wall $*
+	FGLLDPATH=$(FGLCM_EXT_DIR) fglcomp -r -M -Wall $*
 
 #%.iem: %.msg
 #	fglmkmsg $< $@
@@ -15,7 +16,6 @@
 define run-seq
   fglrun $* -run
 endef
-
 FGLCM_WC_DIR=./webcomponents/fglcm
 CMDIR=$(FGLCM_WC_DIR)/codemirror
 
@@ -36,7 +36,13 @@ all:: .submodule $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
 	git submodule update
 	touch $@
 
-cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m
+
+cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m $(FGLCM_EXT_DIR)/fglcm_ext.42m
+
+$(FGLCM_EXT_DIR)/fglcm_ext.42m: $(FGLCM_EXT_DIR)/fglcm_ext.4gl
+
+$(FGLCM_EXT_DIR)/fglcm_ext.42m:
+	$(MAKE) -C $(FGLCM_EXT_DIR)
 
 fglped_md_filedlg.42m: fglped_fileutils.42m
 

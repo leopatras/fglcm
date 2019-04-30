@@ -15,6 +15,11 @@ fullname () {
 SCRIPT_NAME=`fullname $0`
 FGLCMDIR=`dirname $SCRIPT_NAME` 
 export LANG="en_US.UTF-8"
+if [ -z "$FGLCM_EXT_DIR" ]
+then
+  export FGLCM_EXT_DIR="$FGLCMDIR/ext"
+fi
+export FGLLDPATH="$FGLCM_EXT_DIR:$FGLCMDIR:$FGLLDPATH"
 #we recompile everything always: hence avoid version clashes
 make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLCMDIR

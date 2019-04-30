@@ -625,6 +625,8 @@ function createEditor(ext) {
         theme: "eclipse",
         mode: mode,
         autofocus:true,
+        lineWrapping: true,
+        styleActiveLine: true,
         /*mylint: true,*/
         lint: lint,
         /*keyMap: "vim",*/

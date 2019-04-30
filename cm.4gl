@@ -2,12 +2,15 @@ OPTIONS SHORT CIRCUIT
 IMPORT util
 IMPORT os
 IMPORT FGL fgldialog
+--IMPORT FGL fglcm_core
+IMPORT FGL fglcm_ext
 IMPORT FGL fglped_md_filedlg
 IMPORT FGL fglped_fileutils
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
 CONSTANT S_CANCEL="*cancel*"
+PUBLIC CONSTANT numExtensionActions=5
 
 TYPE proparr_t DYNAMIC ARRAY OF STRING
 DEFINE m_error_line STRING
@@ -32,7 +35,18 @@ DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
 DEFINE m_InitSeen BOOLEAN
 --CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
-DEFINE m_recents DYNAMIC ARRAY OF STRING
+TYPE RecentsEntry RECORD
+  fileName STRING,
+  cursor1 RECORD
+      line INT,
+      ch INT
+  END RECORD,
+  cursor2 RECORD
+      line INT,
+      ch INT
+  END RECORD
+END RECORD
+DEFINE m_recents DYNAMIC ARRAY OF RecentsEntry
 DEFINE m_lastEditorInstruction STRING
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
@@ -124,6 +138,8 @@ FUNCTION fglcm_main()
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg=NULL
   END IF
+  CALL fglcm_ext.init()
+  CALL ui.Form.setDefaultInitializer("fglcm_ext_form_init")
   LET result=edit_source(my_arg_val(1))
   EXIT PROGRAM result
 END FUNCTION
@@ -226,19 +242,8 @@ FUNCTION hideOrShowPreview()
 END FUNCTION
 
 FUNCTION checkMainFormOpen()
-  IF NOT isGBC() AND m_mainFormOpen THEN
-    RETURN
-  END IF
-  IF m_mainFormOpen THEN
-    CLOSE FORM f
-  END IF
-  --AND ((m_IsNewFile AND m_NewFileExt=="per") OR isPERFile(m_srcfile))
-  --IF isGBC() THEN
-  --  OPEN FORM f FROM "cm_webpreview"
-  --ELSE
-    OPEN FORM f FROM "cm"
-  --END IF
-  DISPLAY FORM f
+  CLOSE WINDOW screen
+  OPEN WINDOW fglcm_main WITH FORM "cm"
   LET m_mainFormOpen=TRUE
   CALL checkFiddleBar()
   CALL hideOrShowPreview()
@@ -247,7 +252,7 @@ END FUNCTION
 --main INPUT to edit the form, everything is called from here
 FUNCTION edit_source(fname)
   DEFINE fname STRING
-  DEFINE changed INTEGER
+  DEFINE changed,i INTEGER
   DEFINE jump_to_error,modified BOOLEAN
   DEFINE tmpname,ans,saveasfile,dummy STRING
   LET changed=1
@@ -290,6 +295,9 @@ FUNCTION edit_source(fname)
       CALL DIALOG.setActionHidden("main4gl",NOT m_IsFiddle)
       CALL DIALOG.setActionHidden("mainper",NOT m_IsFiddle)
       CALL DIALOG.setActionHidden("browse_demos",NOT m_IsFiddle)
+      FOR i=1 TO numExtensionActions
+        CALL DIALOG.setActionHidden(sfmt("fglcm_ext%1",i),TRUE)
+      END FOR
       CALL initialize_when(TRUE)
       CALL compileTmp(tmpname,TRUE)
       CALL display_full(FALSE,FALSE)
@@ -378,7 +386,16 @@ LABEL action_new:
       CALL compileTmp(tmpname,FALSE)
       CALL hideOrShowPreview()
       CALL flush_cm()
-
+    ON ACTION fglcm_ext1
+      CALL fglcm_ext.extensionAction("fglcm_ext1")
+    ON ACTION fglcm_ext2
+      CALL fglcm_ext.extensionAction("fglcm_ext2")
+    ON ACTION fglcm_ext3
+      CALL fglcm_ext.extensionAction("fglcm_ext3")
+    ON ACTION fglcm_ext4
+      CALL fglcm_ext.extensionAction("fglcm_ext4")
+    ON ACTION fglcm_ext5
+      CALL fglcm_ext.extensionAction("fglcm_ext5")
     ON ACTION main4gl
       CALL fcsync()
       LET tmpname=doOpen(tmpname,"main.4gl")
@@ -483,8 +500,14 @@ END FUNCTION
 
 FUNCTION open_finish(tmpname,cname)
   DEFINE tmpname,cname STRING
+  RETURN open_finish_int(tmpname,cname,FALSE)
+END FUNCTION
+
+FUNCTION open_finish_int(tmpname,cname,dontjump_to_error)
+  DEFINE tmpname,cname STRING
+  DEFINE dontjump_to_error BOOLEAN
   --note we compile unconditinally because the buffers may have changed
-  CALL compileTmp(tmpname,cname IS NOT NULL)
+  CALL compileTmp(tmpname,(cname IS NOT NULL) AND dontjump_to_error==FALSE )
   CALL flush_cm()
   RETURN tmpname
 END FUNCTION
@@ -504,6 +527,23 @@ FUNCTION doOpen(tmpname,cname)
   RETURN open_finish(tmpname,cname)
 END FUNCTION
 
+FUNCTION normalizeName(pwd,name)
+  DEFINE pwd,name,parent,pre STRING
+  IF name.getIndexOf(pwd,1)==1 THEN
+    --print short names for current dir and sub dirs
+    RETURN name.subString(pwd.getLength()+2,name.getLength())
+  END IF
+  LET parent=pwd
+  LET pre=".."
+  WHILE (parent:=os.Path.dirName(parent)) IS NOT NULL 
+    IF name.getIndexOf(parent,1)==1 THEN
+      RETURN os.Path.join(pre,name.subString(parent.getLength()+2,name.getLength()))
+    END IF
+    LET pre=pre,"/.."
+  END WHILE
+  RETURN name
+END FUNCTION
+
 FUNCTION displayPickList()
   DEFINE entry,el,pwd,full STRING
   DEFINE i INT
@@ -511,11 +551,12 @@ FUNCTION displayPickList()
   LET full=os.Path.fullPath(m_srcfile)
   LET pwd=os.Path.pwd()
   FOR i=1 TO m_recents.getLength()
-    IF NOT full.equals(m_recents[i]) THEN
-      LET el=m_recents[i]
-      IF pwd.equals(os.Path.dirName(el)) THEN
-        LET el=os.Path.baseName(el)
-      END IF
+    IF NOT full.equals(m_recents[i].fileName) THEN
+      LET el=m_recents[i].fileName
+      LET el=normalizeName(pwd,el)
+      --IF pwd.equals(os.Path.dirName(el)) THEN
+      --  LET el=os.Path.baseName(el)
+      --END IF
       LET arr[arr.getLength()+1]=el
     END IF
   END FOR
@@ -537,6 +578,7 @@ END FUNCTION
 
 FUNCTION openFromPickList()
   DEFINE tmpname,cname,oldname STRING
+  DEFINE re RecentsEntry
   LET oldname=open_prepare(tmpname)
   IF oldname IS NOT NULL THEN
     RETURN oldname
@@ -544,6 +586,13 @@ FUNCTION openFromPickList()
   LET cname = displayPickList()
   IF cname IS NOT NULL THEN
     CALL open_load(tmpname,cname) RETURNING tmpname,cname
+  END IF
+  IF cname IS NOT NULL THEN
+    --MY_ASSERT(m_recents.getLength()>=1)
+    LET re.*=m_recents[1].*
+    LET m_cmRec.cursor1.*=re.cursor1.*
+    LET m_cmRec.cursor2.*=re.cursor2.*
+    RETURN open_finish_int(tmpname,cname,re.cursor1.line IS NOT NULL)
   END IF
   RETURN open_finish(tmpname,cname)
 END FUNCTION
@@ -974,6 +1023,7 @@ FUNCTION syncInt(newVal)
   --LET src=cmRec.full
   LET m_cline=cmRec.cursor1.line+1
   LET m_ccol=cmRec.cursor1.ch+1
+  CALL updateRecentsCursor(cmRec.cursor1.*,cmRec.cursor2.*)
   LET m_locationhref=cmRec.locationhref
   LET len=cmRec.modified.getLength()
   FOR i=1 TO len
@@ -1068,7 +1118,6 @@ FUNCTION flush_cm()
   LET m_cmRec.cmdIdx=m_cmdIdx
   LET m_cmRec.vm=TRUE
   LET flushTimeout=fgl_getenv("FGLCM_FLUSHTIMEOUT")
-  DISPLAY "flushTiout is:",flushTimeout
   LET m_cmRec.flushTimeout=IIF((flushTimeout IS NULL) OR flushTimeout=="0",1000,flushTimeout)
   LET m_cm=util.JSON.stringifyOmitNulls(m_cmRec)
   IF m_cm.getLength()>140 THEN
@@ -1135,6 +1184,7 @@ FUNCTION display_full(initialize,flush)
   ELSE
     LET ext=os.Path.extension(m_srcfile)
     LET basename=os.Path.baseName(m_srcfile)
+    LET m_cmRec.fileName=m_srcfile
     CASE 
       WHEN ext.getLength()>0 
         LET m_cmRec.extension=ext
@@ -1800,14 +1850,35 @@ FUNCTION setCurrFile(fname,tmpname) --sets m_srcfile
   RETURN tmpname
 END FUNCTION
 
+FUNCTION updateRecentsCursor(cursor1,cursor2)
+  DEFINE cursor1 RECORD
+    line INT,
+    ch INT
+  END RECORD
+  DEFINE cursor2 RECORD
+    line INT,
+    ch INT
+  END RECORD
+  --MY_ASSERT(m_recents.getLength()>=1)
+  --MY_ASSERT(m_recents[1]==os.Path.fullPath(m_srcfile)
+  LET m_recents[1].cursor1.*=cursor1.*
+  LET m_recents[1].cursor2.*=cursor2.*
+END FUNCTION
+
 FUNCTION addToRecents()
   DEFINE i INT
   DEFINE found INT
+  DEFINE foundEntry RecentsEntry
   DEFINE fullPath STRING
+  INITIALIZE foundEntry.* TO NULL
+  IF m_srcfile IS NULL THEN
+    RETURN --ignore new files
+  END IF
   LET fullPath=os.Path.fullPath(m_srcfile)
   FOR i=1 TO m_recents.getLength()
-    IF fullPath.equals(m_recents[i]) THEN
+    IF fullPath.equals(m_recents[i].fileName) THEN
       LET found=i
+      LET foundEntry.*=m_recents[found].*
       EXIT FOR
     END IF
   END FOR
@@ -1816,7 +1887,8 @@ FUNCTION addToRecents()
   END IF
   --insert in the head of recent list
   CALL m_recents.insertElement(1)
-  LET m_recents[1]=fullPath
+  LET foundEntry.fileName=fullPath
+  LET m_recents[1].*=foundEntry.*
 END FUNCTION
 
 --computes the temporary .per file name to work with during our manipulations
