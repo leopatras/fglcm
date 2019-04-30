@@ -1,0 +1,30 @@
+#!/bin/bash
+# fgldeb helper script to have the right env
+# attach to cm with
+# % ./fgldebcm -p <pid>
+# invoke with arguments
+# % ./fgldebcm <editorfile>
+fullname () {
+  local myDIR=`dirname "$1"`
+  pushd "$myDIR" >/dev/null
+  realDIR=`pwd`
+  popd > /dev/null
+  local basefile=`basename "$1"`
+  echo "$realDIR/$basefile"
+}
+
+SCRIPT_NAME=`fullname $0`
+FGLCMDIR=`dirname $SCRIPT_NAME` 
+export LANG="en_US.UTF-8"
+if [ -z "$FGLCM_EXT_DIR" ]
+then
+  export FGLCM_EXT_DIR="$FGLCMDIR/ext"
+fi
+export FGLLDPATH="$FGLCM_EXT_DIR:$FGLCMDIR:$FGLLDPATH"
+export FGLCMDIR
+if [ "$1" == "-p" ]
+then
+  exec fgldeb "$@" 
+else
+  exec fgldeb $FGLCMDIR/cm.42m "$@" 
+fi 
