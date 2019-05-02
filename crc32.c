@@ -3,7 +3,8 @@
 #include <stdlib.h>
 
 uint32_t table_value(uint32_t r) {
-  for(int j = 0; j < 8; ++j) {
+  int j;
+  for(j = 0; j < 8; ++j) {
     r = (r & 1? 0: (uint32_t)0xEDB88320L) ^ r >> 1;
   }
   return r ^ (uint32_t)0xFF000000L;
