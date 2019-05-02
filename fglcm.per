@@ -10,7 +10,7 @@ ACTION DEFAULTS
   ACTION open_from_picklist ( Text="&Pick from recently used files...", COMMENT="Opens from the recent files", ACCELERATOR=ALT-P,ACCELERATOR2=CONTROL-P,DEFAULTVIEW=NO)
   ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=ALT-S,ACCELERATOR2=CONTROL-S,DEFAULTVIEW=NO)
   ACTION compile (TEXT="Compile", COMMENT="Compiles the module and jumps to the first issue" ,ACCELERATOR=F4,ACCELERATOR2=ALT-C)
-  ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
+  --ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
   --ACTION jump_to_def( TEXT="Jump to Definition")
   ACTION find ( TEXT="Search..." ,COMMENT ="Opens a dialog to search text",ACCELERATOR=ALT-F,ACCELERATOR2=CONTROL-F,IMAGE="find" )
   ACTION findnext  ( TEXT="Find Next", comment="Finds the next occurence of the search string", ACCELERATOR=F3 ,ACCELERATOR2=Control-G)
@@ -43,7 +43,7 @@ TOPMENU
   --  COMMAND replaceagain
   --  COMMAND undolastreplace
   --  SEPARATOR
-    --COMMAND compile
+    COMMAND compile
     COMMAND gotoline
   --  COMMAND jump_to_def 
   --  SEPARATOR
@@ -54,25 +54,24 @@ TOPMENU
   --GROUP(TEXT="View")
   --  COMMAND toggle_toolbar 
   --END
-  GROUP(TEXT="Product")
-      COMMAND compile
-      COMMAND run
-      SEPARATOR
-      COMMAND preview
-      COMMAND showpreviewurl
-  END 
-  
+  --GROUP(TEXT="Product")
+      --COMMAND compile
+      --COMMAND run
+      --SEPARATOR
+      --COMMAND preview
+      --COMMAND showpreviewurl
+  --END 
 END
 
-TOOLBAR fiddlebar
-  ITEM browse_demos(TEXT="Demos",IMAGE="fa-sitemap",COMMENT="Browse demos and select samples")
-  SEPARATOR
-  ITEM main4gl(TEXT="Program",IMAGE="fa-file-text-o",COMMENT="Main source (main.4gl)")
-  ITEM run
-  SEPARATOR
-  ITEM mainper(TEXT="Form",IMAGE="fa-list-alt",COMMENT="Main form (main.per)")
-  ITEM preview(HIDDEN)
-END
+--TOOLBAR fiddlebar
+--  ITEM browse_demos(TEXT="Demos",IMAGE="fa-sitemap",COMMENT="Browse demos and select samples")
+--  SEPARATOR
+--  ITEM main4gl(TEXT="Program",IMAGE="fa-file-text-o",COMMENT="Main source (main.4gl)")
+--  ITEM run
+--  SEPARATOR
+--  ITEM mainper(TEXT="Form",IMAGE="fa-list-alt",COMMENT="Main form (main.per)")
+--  ITEM preview(HIDDEN)
+--END
 
 LAYOUT(STYLE="cm",MINHEIGHT=40,MINWIDTH=90)
 GRID

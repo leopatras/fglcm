@@ -10,6 +10,7 @@
      <StyleAttribute name="actionPanelPosition" value="none" />
      <StyleAttribute name="ringMenuPosition"    value="none" />
      <StyleAttribute name="statusBarType"       value="none" />
+     <StyleAttribute name="position" value="center" />
   </Style>  
   <Style name="Window.preview">
      <StyleAttribute name="actionPanelPosition" value="right" />
@@ -19,7 +20,7 @@
   </Style>
   <Style name="Window.dialog_resize">
      <StyleAttribute name="windowType" value="modal" />
-     <StyleAttribute name="windowSheet" value="yes" />
+     <StyleAttribute name="XwindowSheet" value="yes" />
      <StyleAttribute name="sizable" value="yes" />
      <StyleAttribute name="position" value="center2" />
      <StyleAttribute name="actionPanelPosition" value="none" />

@@ -1,5 +1,5 @@
 .SUFFIXES: .per .42f .4gl .42m .msg .img 
-FGLCM_EXT_DIR=./ext
+FGLCM_EXT_DIR=$(CURDIR)/ext
 
 .msg.iem:
 	fglmkmsg $< $@
@@ -29,7 +29,7 @@ ifeq ($(UNAME),Linux)
   CRC32=./crc32
 endif
 
-all:: .submodule $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
+all:: .submodule $(CRC32) fglcm_main.42m fglcm_webpreview.42m spex.42m $(FORMS)
 
 .submodule:
 	git submodule init
@@ -37,7 +37,7 @@ all:: .submodule $(CRC32) cm.42m fglcm_webpreview.42m spex.42m $(FORMS)
 	touch $@
 
 
-cm.42m: fglped_md_filedlg.42m fglped_fileutils.42m $(FGLCM_EXT_DIR)/fglcm_ext.42m
+fglcm_main.42m: fglcm.42m fglped_md_filedlg.42m fglped_fileutils.42m $(FGLCM_EXT_DIR)/fglcm_ext.42m
 
 $(FGLCM_EXT_DIR)/fglcm_ext.42m: $(FGLCM_EXT_DIR)/fglcm_ext.4gl
 
@@ -76,25 +76,28 @@ runcmdemo: cmdemo.42m cmdemo.42f
 	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun cmdemo
 
 fiddle: all cmdemo.42m cmdemo.42f
-	-mkdir home
+	rm -rf home&&mkdir home
 	cp main.4gl main.per home/
-	cd home && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home fglrun $(CURDIR)/cm.42m main.4gl
+	cd home && ls && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLCM_EXT_DIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home fglrun $(CURDIR)/fglcm_main.42m main.4gl
 
 webfiddle: all cmdemo.42m cmdemo.42f
-	-mkdir home
-	cp main.4gl main.per home/
-	cd home && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home $(CURDIR)/fglwebrun/fglwebrun $(CURDIR)/cm.42m main.4gl
+	#rm -rf home&&mkdir home
+	#cp main.4gl main.per home/
+	FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(CURDIR)/ext:$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home $(CURDIR)/fglwebrun/fglwebrun $(CURDIR)/fglcm_main main.4gl
 
 demo: all
-	fglrun cm.42m test/foo.4gl
+	./cm test/foo.4gl
 
 clean_prog:
-	rm -f *.42? .*.42? home/*.*
+	rm -f *.42? .*.42? ext/*.42* 
 
 clean: clean_prog
 	rm -f .submodule ./crc32 $(FGLCM_WC_DIR)/customMode/4gl.js $(FGLCM_WC_DIR)/customMode/per.js
+	rm -rf ./home
 	cd $(CMDIR) && git clean -fdx && cd -
+	make -C ext clean
 	make -C webcomponents/fglcm clean
+
 
 dist: $(CMDIR)/lib/codemirror.js
 	cp $(CMDIR)/lib/codemirror.js $(FGLCM_WC_DIR)/codemirror.js

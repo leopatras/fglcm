@@ -3,19 +3,23 @@ IMPORT util
 IMPORT os
 IMPORT FGL fgldialog
 --IMPORT FGL fglcm_core
-IMPORT FGL fglcm_ext
 IMPORT FGL fglped_md_filedlg
 IMPORT FGL fglped_fileutils
+--the webcomponents value->used in the main INPUT
+PUBLIC DEFINE m_cm STRING
+--how many extension actions are there
+PUBLIC CONSTANT numExtensionActions=5
+PUBLIC CONSTANT S_CANCEL="*cancel*"
+
 CONSTANT S_ERROR="Error"
 --error image
 CONSTANT IMG_ERROR="stop"
-CONSTANT S_CANCEL="*cancel*"
-PUBLIC CONSTANT numExtensionActions=5
 
 TYPE proparr_t DYNAMIC ARRAY OF STRING
 DEFINE m_error_line STRING
 DEFINE m_cline,m_ccol INT
 DEFINE m_srcfile STRING
+DEFINE m_tmpname STRING
 DEFINE m_title STRING
 DEFINE compile_arr DYNAMIC ARRAY OF STRING
 DEFINE m_CRCProg STRING
@@ -101,47 +105,29 @@ TYPE CmType RECORD
         ch INT
       END RECORD,
       message STRING,
-      severity STRING
+      severity STRING,
+      errfile STRING
     END RECORD,
     flushTimeout INT
 END RECORD
 
 DEFINE m_cmRec CmType
-DEFINE m_cm STRING
 DEFINE m_arg_0 STRING
 DEFINE m_args DYNAMIC ARRAY OF STRING
-MAIN
+
+FUNCTION init_args()
   DEFINE i INT
   FOR i=1 TO num_args()
     LET m_args[i]=arg_val(i)
   END FOR
   LET m_arg_0=arg_val(0)
-  CALL fglcm_main()
-END MAIN
+END FUNCTION
 
 FUNCTION setArgs(arg0,args)
   DEFINE arg0 STRING
   DEFINE args DYNAMIC ARRAY OF STRING
   LET m_arg_0=arg0
   LET m_args=args
-END FUNCTION
-
-FUNCTION fglcm_main()
-  DEFINE result INT
-  LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
-  CALL ui.Interface.loadStyles("fglcm")
-  --CALL initCRC32Table()
-  CALL loadKeywords()
-  LET m_lastCRC=NULL
-  LET m_CRCProg=os.Path.fullPath(selfpathjoin("crc32"))
-  DISPLAY "m_CRCProg:",m_CRCProg
-  IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
-    LET m_CRCProg=NULL
-  END IF
-  CALL fglcm_ext.init()
-  CALL ui.Form.setDefaultInitializer("fglcm_ext_form_init")
-  LET result=edit_source(my_arg_val(1))
-  EXIT PROGRAM result
 END FUNCTION
 
 FUNCTION selfpathjoin(what)
@@ -159,6 +145,63 @@ FUNCTION my_arg_val(index)
     END IF
   END IF
   RETURN NULL
+END FUNCTION
+
+FUNCTION init()
+  LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
+  CALL ui.Interface.loadStyles("fglcm")
+  --CALL initCRC32Table()
+  CALL loadKeywords()
+  LET m_lastCRC=NULL
+  LET m_CRCProg=os.Path.fullPath(selfpathjoin("crc32"))
+  DISPLAY "m_CRCProg:",m_CRCProg
+  IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
+    LET m_CRCProg=NULL
+  END IF
+END FUNCTION
+
+FUNCTION before_input(d)
+  DEFINE d ui.Dialog
+  DEFINE i INT
+  CALL d.setActionActive("run",FALSE)
+  CALL setPreviewActionActive(FALSE)
+  CALL d.setActionActive("main4gl",m_IsFiddle)
+  CALL d.setActionActive("mainper",m_IsFiddle)
+  CALL d.setActionActive("browse_demos",m_IsFiddle)
+  CALL d.setActionHidden("main4gl",NOT m_IsFiddle)
+  CALL d.setActionHidden("mainper",NOT m_IsFiddle)
+  CALL d.setActionHidden("browse_demos",NOT m_IsFiddle)
+  FOR i=1 TO numExtensionActions
+    CALL d.setActionHidden(sfmt("fglcm_ext%1",i),TRUE)
+  END FOR
+  CALL initialize_when(TRUE)
+  CALL compileTmp(TRUE)
+  CALL display_full(FALSE,FALSE)
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION cleanup()
+  CALL delete_tmpfiles()
+  DISPLAY NULL TO webpreview
+  CALL os.Path.delete(getSession42f()) RETURNING status
+END FUNCTION
+
+FUNCTION deleteLog()
+  DEFINE logfile STRING
+  LET logfile=fgl_getenv("FGLCM_LOGFILE")
+  IF logfile IS NOT NULL THEN 
+    DISPLAY "remove log at :",logfile
+    CALL os.Path.delete(logfile) RETURNING status
+  END IF
+END FUNCTION
+
+FUNCTION doClose()
+  IF checkFileSave()=S_CANCEL THEN
+    RETURN
+  END IF
+  CALL cleanup()
+  CALL deleteLog()
+  EXIT PROGRAM 0
 END FUNCTION
 
 FUNCTION checkFiddleBar()
@@ -241,245 +284,29 @@ FUNCTION hideOrShowPreview()
   END IF  
 END FUNCTION
 
-FUNCTION checkMainFormOpen()
+FUNCTION openMainWindow()
   CLOSE WINDOW screen
-  OPEN WINDOW fglcm_main WITH FORM "cm"
+  OPEN WINDOW fglcm WITH FORM "fglcm"
   LET m_mainFormOpen=TRUE
   CALL checkFiddleBar()
   CALL hideOrShowPreview()
 END FUNCTION
 
---main INPUT to edit the form, everything is called from here
-FUNCTION edit_source(fname)
-  DEFINE fname STRING
-  DEFINE changed,i INTEGER
-  DEFINE jump_to_error,modified BOOLEAN
-  DEFINE tmpname,ans,saveasfile,dummy STRING
-  LET changed=1
-  IF fname IS NULL THEN
-    LET m_srcfile=NULL
-    IF file_new(NULL)==S_CANCEL THEN
-      RETURN 1
-    END IF
-  ELSE
-    LET m_srcfile=fname
-    IF NOT file_read(m_srcfile) THEN
-      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),
-          "yes","yes|no|cancel","question",0))=S_CANCEL 
-      THEN
-        RETURN 1
-      END IF
-      IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
-        RETURN 1
-      END IF
-      IF ans="yes" THEN
-        IF NOT my_write(m_srcfile,FALSE) THEN
-          RETURN 1
-        END IF
-      ELSE
-        RETURN 1
-      END IF
-    END IF
-  END IF
-  LET tmpname=setCurrFile(m_srcfile,tmpname)
-  CALL savelines()
-  CALL checkMainFormOpen()
-  OPTIONS INPUT WRAP
-  INPUT m_cm WITHOUT DEFAULTS FROM cm ATTRIBUTE(accept=FALSE,cancel=FALSE)
-    BEFORE INPUT
-      CALL DIALOG.setActionActive("run",FALSE)
-      CALL setPreviewActionActive(FALSE)
-      CALL DIALOG.setActionActive("main4gl",m_IsFiddle)
-      CALL DIALOG.setActionActive("mainper",m_IsFiddle)
-      CALL DIALOG.setActionActive("browse_demos",m_IsFiddle)
-      CALL DIALOG.setActionHidden("main4gl",NOT m_IsFiddle)
-      CALL DIALOG.setActionHidden("mainper",NOT m_IsFiddle)
-      CALL DIALOG.setActionHidden("browse_demos",NOT m_IsFiddle)
-      FOR i=1 TO numExtensionActions
-        CALL DIALOG.setActionHidden(sfmt("fglcm_ext%1",i),TRUE)
-      END FOR
-      CALL initialize_when(TRUE)
-      CALL compileTmp(tmpname,TRUE)
-      CALL display_full(FALSE,FALSE)
-      CALL flush_cm()
-    ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
-      LET m_InitSeen=TRUE
-      DISPLAY "init seen"
-      DISPLAY m_cm TO cm
-
-    ON ACTION run
-      CALL runprog(tmpname)
-
-    ON ACTION preview
-      CALL preview_form()
-
-    ON ACTION showpreviewurl
-      CALL show_previewurl()
-
-    ON ACTION close_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL sync()
-      GOTO action_close
-    ON ACTION close
-      CALL fcsync()
-LABEL action_close:
-      IF checkFileSave()=S_CANCEL THEN
-        CONTINUE INPUT
-      ELSE
-        EXIT INPUT
-      END IF
-
-    ON ACTION complete
-      CALL sync() 
-      IF NOT my_write(tmpname,TRUE) THEN
-        EXIT INPUT
-      END IF
-      CALL initialize_when(TRUE)
-      LET m_cmRec.proparr=complete(tmpname)
-      CALL compile_and_process(tmpname,FALSE) RETURNING dummy
-      CALL flush_cm()
-
-    ON ACTION find
-      CALL fcsync()
-      CALL initialize_when(TRUE)
-      LET m_cmRec.cmCommand="find"
-      CALL compileTmp(tmpname,FALSE)
-      CALL flush_cm()
-      
-    ON ACTION replace
-      CALL fcsync()
-      CALL initialize_when(TRUE)
-      LET m_cmRec.cmCommand="replace"
-      CALL compileTmp(tmpname,FALSE)
-      CALL flush_cm()
-
-    ON ACTION gotoline_cm
-      CALL sync()
-      GOTO action_gotoline
-    ON ACTION gotoline
-      CALL fcsync()
-LABEL action_gotoline:
-      CALL do_gotoline()
-
-    ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
-      CALL sync()
-      LET jump_to_error=FALSE
-      GOTO do_compile
-    ON ACTION compile ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL fcsync()
-      LET jump_to_error=TRUE
-LABEL do_compile:
-      CALL initialize_when(TRUE)
-      CALL compileTmp(tmpname,jump_to_error)
-      CALL flush_cm()
-
-    ON ACTION new_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL sync()
-      GOTO action_new
-    ON ACTION new
-      CALL fcsync()
-LABEL action_new:
-      IF (ans:=checkFileSave())=S_CANCEL THEN CONTINUE INPUT END IF
-      CALL initialize_when(TRUE)
-      IF file_new(NULL)==S_CANCEL THEN CONTINUE INPUT END IF
-      CALL display_full(FALSE,FALSE)
-      LET tmpname=setCurrFile("",tmpname)
-      CALL compileTmp(tmpname,FALSE)
-      CALL hideOrShowPreview()
-      CALL flush_cm()
-    ON ACTION fglcm_ext1
-      CALL fglcm_ext.extensionAction("fglcm_ext1")
-    ON ACTION fglcm_ext2
-      CALL fglcm_ext.extensionAction("fglcm_ext2")
-    ON ACTION fglcm_ext3
-      CALL fglcm_ext.extensionAction("fglcm_ext3")
-    ON ACTION fglcm_ext4
-      CALL fglcm_ext.extensionAction("fglcm_ext4")
-    ON ACTION fglcm_ext5
-      CALL fglcm_ext.extensionAction("fglcm_ext5")
-    ON ACTION main4gl
-      CALL fcsync()
-      LET tmpname=doOpen(tmpname,"main.4gl")
-
-    ON ACTION mainper
-      CALL fcsync()
-      LET tmpname=doOpen(tmpname,"main.per")
-      
-    ON ACTION open_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL sync()
-      GOTO action_open
-    ON ACTION open
-      CALL fcsync()
-LABEL action_open:
-      LET tmpname=doOpen(tmpname,NULL)
-    ON ACTION open_from_picklist
-      CALL fcsync()
-      LET tmpname=openFromPickList()
-    ON ACTION save_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL sync()
-      DISPLAY "save_cm"
-      GOTO action_save
-    ON ACTION save
-      DISPLAY "save_topmenu"
-      CALL fcsync()
-      LET modified=m_modified
-LABEL action_save:
-      IF isNewFile() THEN
-        GOTO dosaveas
-      END IF
-      IF NOT file_write(m_srcfile,FALSE) THEN
-        CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
-        --TODO: handle this worst case 
-      ELSE
-        DISPLAY "saved"
-        CALL savelines()
-        CALL initialize_when(TRUE)
-        CALL compileTmp(tmpname,FALSE)
-        CALL flush_cm()
-        CALL mymessage(sfmt("saved:%1",m_srcfile))
-      END IF
-
-    ON ACTION saveas
-      DISPLAY "saveas"
-LABEL dosaveas:
-      IF (saveasfile:=fglped_saveasdlg(m_srcfile)) IS NOT NULL THEN
-        IF NOT file_write(saveasfile,FALSE) THEN
-          CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",saveasfile),IMG_ERROR)
-        ELSE
-          LET tmpname=setCurrFile(saveasfile,tmpname)
-          CALL savelines()
-          CALL resetNewFile()
-          CALL mysetTitle()
-          CALL display_full(TRUE,TRUE)
-        END IF
-      END IF
-
-    ON ACTION browse_demos
-      CALL fcsync()
-      LET tmpname=browse_demos(tmpname)
-  END INPUT
-  CALL delete_tmpfiles(tmpname)
-  DISPLAY NULL TO webpreview
-  CALL os.Path.delete(getSession42f()) RETURNING dummy
-  RETURN 0
-END FUNCTION
-
-
-FUNCTION open_prepare(tmpname)
-  DEFINE tmpname STRING
+PRIVATE FUNCTION open_prepare()
   DEFINE ans STRING
   IF (ans:=checkFileSave())=S_CANCEL THEN 
-    RETURN tmpname
+    RETURN S_CANCEL
   END IF
   CALL initialize_when(TRUE)
   IF ans="no" THEN 
     CALL display_full(FALSE,FALSE)
+    CALL savelines()
   END IF
-  CALL savelines()
   RETURN NULL
 END FUNCTION
 
-FUNCTION open_load(tmpname,cname)
-  DEFINE tmpname,cname STRING
+PRIVATE FUNCTION open_load(cname)
+  DEFINE cname STRING
   IF NOT file_read(cname) THEN
     CALL restorelines()
     CALL fgl_winmessage(S_ERROR,sfmt("Can't read:%1",cname),IMG_ERROR)
@@ -488,43 +315,122 @@ FUNCTION open_load(tmpname,cname)
     CALL resetNewFile()
     LET m_lastCRC=NULL
     CALL savelines()
-    LET tmpname = setCurrFile(cname,tmpname)
+    CALL setCurrFile(cname)
     CALL display_full(FALSE,FALSE)
   END IF
-  IF NOT isPERFile(tmpname) THEN
+  IF NOT isPERFile(m_tmpname) THEN
     CALL setPreviewActionActive(FALSE)
   END IF
   CALL hideOrShowPreview()
-  RETURN tmpname,cname
+  RETURN cname
 END FUNCTION
 
-FUNCTION open_finish(tmpname,cname)
-  DEFINE tmpname,cname STRING
-  RETURN open_finish_int(tmpname,cname,FALSE)
+PRIVATE FUNCTION open_finish(cname)
+  DEFINE cname STRING
+  CALL open_finish_int(cname,FALSE)
 END FUNCTION
 
-FUNCTION open_finish_int(tmpname,cname,dontjump_to_error)
-  DEFINE tmpname,cname STRING
+PRIVATE FUNCTION open_finish_int(cname,dontjump_to_error)
+  DEFINE cname STRING
   DEFINE dontjump_to_error BOOLEAN
   --note we compile unconditinally because the buffers may have changed
-  CALL compileTmp(tmpname,(cname IS NOT NULL) AND dontjump_to_error==FALSE )
+  CALL compileTmp((cname IS NOT NULL) AND dontjump_to_error==FALSE )
   CALL flush_cm()
-  RETURN tmpname
 END FUNCTION
 
-FUNCTION doOpen(tmpname,cname)
-  DEFINE tmpname,cname,oldname STRING
-  LET oldname=open_prepare(tmpname)
-  IF oldname IS NOT NULL THEN
-    RETURN oldname
+FUNCTION doFileOpen(cname)
+  DEFINE cname,res STRING
+  LET res=open_prepare()
+  IF res IS NOT NULL THEN
+    RETURN
   END IF
   IF cname IS NULL THEN
     LET cname = fglped_filedlg()
   END IF
   IF cname IS NOT NULL THEN
-    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+    LET cname=open_load(cname)
   END IF
-  RETURN open_finish(tmpname,cname)
+  CALL open_finish(cname)
+END FUNCTION
+
+FUNCTION doFileSave()
+  IF isNewFile() THEN
+    CALL doFileSaveAs()
+    RETURN
+  END IF
+  IF NOT file_write(m_srcfile,FALSE) THEN
+    CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
+    --TODO: handle this worst case 
+  ELSE
+    DISPLAY "saved"
+    CALL savelines()
+    CALL initialize_when(TRUE)
+    CALL compileTmp(FALSE)
+    CALL flush_cm()
+    CALL mymessage(sfmt("saved:%1",m_srcfile))
+  END IF
+END FUNCTION
+
+FUNCTION doFileSaveAs()
+  DEFINE saveasfile STRING
+  IF (saveasfile:=fglped_saveasdlg(m_srcfile)) IS NOT NULL THEN
+    IF NOT file_write(saveasfile,FALSE) THEN
+      CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",saveasfile),IMG_ERROR)
+    ELSE
+      CALL setCurrFile(saveasfile)
+      CALL savelines()
+      CALL resetNewFile()
+      CALL mysetTitle()
+      CALL display_full(TRUE,TRUE)
+    END IF
+  END IF
+END FUNCTION
+
+FUNCTION doFileNew()
+  DEFINE ans STRING
+  IF (ans:=checkFileSave())=S_CANCEL THEN 
+    RETURN
+  END IF
+  CALL initialize_when(TRUE)
+  IF file_new(NULL)==S_CANCEL THEN 
+    RETURN
+  END IF
+  CALL display_full(FALSE,FALSE)
+  CALL setCurrFile("")
+  CALL compileTmp(FALSE)
+  CALL hideOrShowPreview()
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION doComplete()
+  IF NOT my_write(m_tmpname,TRUE) THEN
+    EXIT PROGRAM 1
+  END IF
+  CALL initialize_when(TRUE)
+  LET m_cmRec.proparr=complete()
+  CALL compile_and_process(FALSE) RETURNING status
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION doCompile(jump_to_error)
+  DEFINE jump_to_error BOOLEAN
+  CALL initialize_when(TRUE)
+  CALL compileTmp(jump_to_error)
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION doFind()
+  CALL initialize_when(TRUE)
+  LET m_cmRec.cmCommand="find"
+  CALL compileTmp(FALSE)
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION doReplace()
+  CALL initialize_when(TRUE)
+  LET m_cmRec.cmCommand="replace"
+  CALL compileTmp(FALSE)
+  CALL flush_cm()
 END FUNCTION
 
 FUNCTION normalizeName(pwd,name)
@@ -544,7 +450,7 @@ FUNCTION normalizeName(pwd,name)
   RETURN name
 END FUNCTION
 
-FUNCTION displayPickList()
+PRIVATE FUNCTION displayPickList()
   DEFINE entry,el,pwd,full STRING
   DEFINE i INT
   DEFINE arr DYNAMIC ARRAY OF STRING
@@ -577,38 +483,39 @@ FUNCTION displayPickList()
 END FUNCTION
 
 FUNCTION openFromPickList()
-  DEFINE tmpname,cname,oldname STRING
+  DEFINE cname,res STRING
   DEFINE re RecentsEntry
-  LET oldname=open_prepare(tmpname)
-  IF oldname IS NOT NULL THEN
-    RETURN oldname
+  LET res=open_prepare()
+  IF res IS NOT NULL THEN
+    RETURN 
   END IF
   LET cname = displayPickList()
   IF cname IS NOT NULL THEN
-    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+    LET cname=open_load(cname)
   END IF
   IF cname IS NOT NULL THEN
     --MY_ASSERT(m_recents.getLength()>=1)
     LET re.*=m_recents[1].*
     LET m_cmRec.cursor1.*=re.cursor1.*
     LET m_cmRec.cursor2.*=re.cursor2.*
-    RETURN open_finish_int(tmpname,cname,re.cursor1.line IS NOT NULL)
+    CALL open_finish_int(cname,re.cursor1.line IS NOT NULL)
+  ELSE
+    CALL open_finish(cname)
   END IF
-  RETURN open_finish(tmpname,cname)
 END FUNCTION
 
-FUNCTION browse_demos(tmpname)
-  DEFINE tmpname,cname,oldname STRING
-  LET oldname=open_prepare(tmpname)
-  IF oldname IS NOT NULL THEN
-    RETURN oldname
+FUNCTION browse_demos()
+  DEFINE cname,res STRING
+  LET res=open_prepare()
+  IF res IS NOT NULL THEN
+    RETURN 
   END IF
   LET cname=run_demos()
   IF cname IS NOT NULL THEN
-    CALL open_load(tmpname,cname) RETURNING tmpname,cname
+    LET cname=open_load(cname)
     LET m_cmRec.cmCommand="reload"
   END IF
-  RETURN open_finish(tmpname,cname)
+  CALL open_finish(cname)
 END FUNCTION
 
 FUNCTION run_demos()
@@ -674,15 +581,15 @@ FUNCTION run_demos()
   RETURN cname
 END FUNCTION
 
-FUNCTION compileTmp(tmpname,jump_to_error)
-  DEFINE tmpname,compmess STRING
+PRIVATE FUNCTION compileTmp(jump_to_error)
+  DEFINE compmess STRING
   DEFINE jump_to_error BOOLEAN
-  IF is4GLOrPerFile(tmpname) THEN
-    LET compmess = saveAndCompile(tmpname,jump_to_error)
+  IF is4GLOrPerFile(m_tmpname) THEN
+    LET compmess = saveAndCompile(jump_to_error)
     IF compmess IS NULL THEN
       CALL mymessage("Compile ok")
-      IF isGBC() AND isPERFile(tmpname) AND getSessionId() IS NOT NULL THEN
-        CALL livePreview(tmpname)
+      IF isGBC() AND isPERFile(m_tmpname) AND getSessionId() IS NOT NULL THEN
+        CALL livePreview(m_tmpname)
       END IF
     END IF
   END IF
@@ -776,16 +683,15 @@ FUNCTION livePreview(tmpname)
   LET m_extURL=getLiveURL("spex",util.Strings.urlEncode(getSessionId()))
 END FUNCTION
 
-FUNCTION runprog(tmpname)
-  DEFINE tmpname STRING
+FUNCTION runprog()
   DEFINE srcname,cmdir,cmd,info,tmp42m,dummy,line STRING
   DEFINE c base.Channel
   DEFINE code INT
 
-  CALL compileAllForms(IIF(m_IsFiddle,os.Path.pwd(),os.Path.dirname(tmpname)))
-  IF (m_lastCompiledPER==tmpname) THEN 
+  CALL compileAllForms(IIF(m_IsFiddle,os.Path.pwd(),os.Path.dirname(m_tmpname)))
+  IF (m_lastCompiledPER==m_tmpname) THEN 
     --need to cp the current tmp 42f fo the real 42f
-    CALL copyTmp2Real42f(tmpname) RETURNING dummy
+    CALL copyTmp2Real42f(m_tmpname) RETURNING dummy
   END IF
   IF m_IsFiddle THEN
     LET srcname=".@main.4gl"
@@ -909,7 +815,7 @@ END FUNCTION
 
 --we delete webcomponents componentType attribute if we
 --encounter webcomponents otherwise the whole GBC dies
-FUNCTION copyDocWithoutComponentType(src,dest)
+PRIVATE FUNCTION copyDocWithoutComponentType(src,dest)
   DEFINE src,dest STRING
   DEFINE doc om.DomDocument
   DEFINE rootNode,node om.DomNode
@@ -985,8 +891,14 @@ FUNCTION mymessage(msg)
     --the message block overlaps the editor with larger messages
     RETURN
   END IF
-  MESSAGE msg -- in GDC this message sometimes causes black flicker
+  MESSAGE msg -- in GDC Mac this message sometimes causes black flicker
   }
+END FUNCTION
+
+FUNCTION setInitSeen()
+  LET m_InitSeen=TRUE
+  DISPLAY "init seen"
+  DISPLAY m_cm TO cm
 END FUNCTION
 
 FUNCTION fcsync() --called if our topmenu fired an action
@@ -1006,7 +918,7 @@ FUNCTION sync() --called if the webco fired an action
   CALL syncInt(fgl_dialog_getbuffer())
 END FUNCTION
 
-FUNCTION syncInt(newVal)
+PRIVATE FUNCTION syncInt(newVal)
   DEFINE newVal,line STRING
   DEFINE orgnum,idx,i,j,z,len,insertpos INT
   DEFINE cmRec CmType
@@ -1079,23 +991,6 @@ FUNCTION syncInt(newVal)
   IF m_orglines.getLength()<>cmRec.lineCount THEN
     CALL err(SFMT("linecount local %1 != linecount remote %2",m_orglines.getLength(),cmRec.lineCount))
   END IF
-  { --we do not use the internal crc: its too slow !
-  LET src=arr2String()
-  LET crc=crc32(src)
-  IF crc<>cmRec.crc THEN
-    --IF src.getLength()<>cmRec.full.getLength() THEN
-    --DISPLAY sfmt("full len %1 != computed getLength %2",cmRec.full.getLength(),src.getLength())
-    CALL fgl_winmessage("Error",sfmt("CRC local %1 != CRC codemirror %2",crc,cmRec.crc),"error")
-    DISPLAY sfmt("crc local %1 != crc codemirror %2",crc,cmRec.crc)
-  ELSE
-    --IF src<>cmRec.full THEN
-    --  DISPLAY "src!=full"
-    --ELSE
-    DISPLAY "ok!!! src==full"
-    --END IF
-  END IF
-  --DISPLAY src
-  }
   DISPLAY ">>----"
   --renumber and compute character count
   LET len=0
@@ -1112,7 +1007,7 @@ FUNCTION syncInt(newVal)
   END IF
 END FUNCTION
 
-FUNCTION flush_cm()
+PRIVATE FUNCTION flush_cm()
   DEFINE flushTimeout INT
   LET m_cmdIdx=m_cmdIdx+1
   LET m_cmRec.cmdIdx=m_cmdIdx
@@ -1129,7 +1024,7 @@ FUNCTION flush_cm()
   DISPLAY m_cm TO cm
 END FUNCTION
 
-FUNCTION do_gotoline()
+FUNCTION doGotoLine()
   DEFINE lineno INT
   LET lineno=1
   OPEN WINDOW gotoline WITH FORM "fglcm_gotoline"
@@ -1141,7 +1036,7 @@ FUNCTION do_gotoline()
   END IF
 END FUNCTION
 
-FUNCTION initialize_when(initialize)
+PRIVATE FUNCTION initialize_when(initialize)
   DEFINE initialize BOOLEAN
   IF initialize THEN
     DISPLAY "initialize m_cmRec"
@@ -1149,7 +1044,7 @@ FUNCTION initialize_when(initialize)
   END IF
 END FUNCTION
 
-FUNCTION flush_when(flush)
+PRIVATE FUNCTION flush_when(flush)
   DEFINE flush BOOLEAN
   IF flush THEN
     CALL flush_cm()
@@ -1157,12 +1052,12 @@ FUNCTION flush_when(flush)
 END FUNCTION
    
 --line and character numbers in codemirror start with 0
-FUNCTION line2cm(line)
+PRIVATE FUNCTION line2cm(line)
   DEFINE line INT
   RETURN line-1
 END FUNCTION
 
-FUNCTION jump_to_line(linenum,col,line2,col2,initialize,flush)
+PRIVATE FUNCTION jump_to_line(linenum,col,line2,col2,initialize,flush)
   DEFINE linenum,col,line2,col2 INT
   DEFINE initialize,flush BOOLEAN
   CALL initialize_when(initialize)
@@ -1173,7 +1068,7 @@ FUNCTION jump_to_line(linenum,col,line2,col2,initialize,flush)
   CALL flush_when(flush)
 END FUNCTION
 
-FUNCTION display_full(initialize,flush)
+PRIVATE FUNCTION display_full(initialize,flush)
   DEFINE initialize,flush BOOLEAN
   DEFINE ext,basename STRING
   CALL initialize_when(initialize)
@@ -1205,31 +1100,29 @@ FUNCTION setActionActive(name,active)
   CALL d.setActionActive(name,active)
 END FUNCTION
 
-FUNCTION compile_and_process(fname,jump_to_error)
-  DEFINE fname STRING
+PRIVATE FUNCTION compile_and_process(jump_to_error)
   DEFINE jump_to_error BOOLEAN
   DEFINE compmess STRING
-  LET compmess=compile_source(fname,0)
+  LET compmess=compile_source(m_tmpname,0)
   IF compmess IS NOT NULL THEN
-    CALL process_compile_errors(fname,jump_to_error)
+    CALL process_compile_errors(m_tmpname,jump_to_error)
   END IF
   RETURN compmess
 END FUNCTION
 
-FUNCTION saveAndCompile(fname,jump_to_error)
-  DEFINE fname STRING
+PRIVATE FUNCTION saveAndCompile(jump_to_error)
   DEFINE jump_to_error BOOLEAN
   DEFINE compmess STRING
-  IF file_write(fname,TRUE) THEN
-    LET compmess=compile_and_process(fname,jump_to_error)
+  IF file_write(m_tmpname,TRUE) THEN
+    LET compmess=compile_and_process(jump_to_error)
   ELSE 
-    LET m_error_line=sfmt("Can't write to:%1",fname)
+    LET m_error_line=sfmt("Can't write to:%1",m_tmpname)
     CALL fgl_winmessage(S_ERROR,m_error_line,IMG_ERROR)
   END IF
   RETURN compmess
 END FUNCTION
 
-FUNCTION buildCompileCmd(dirname,compOrForm,cparam,fname)
+PRIVATE FUNCTION buildCompileCmd(dirname,compOrForm,cparam,fname)
   DEFINE dirname,compOrForm,cparam,fname STRING
   DEFINE cmd,baseName STRING
   DISPLAY "buildCompileCmd dirname:",dirname
@@ -1248,6 +1141,9 @@ END FUNCTION
 FUNCTION regularFromTmpName(tmpname)
   DEFINE tmpname,srcname STRING
   DEFINE atidx INT
+  IF tmpname==m_tmpname THEN
+    RETURN m_srcfile
+  END IF
   IF (atidx:=tmpname.getIndexOf(".@",1))>0 THEN
     LET srcname=tmpname.subString(1,atidx-1),
                 tmpname.subString(atidx+2,tmpname.getLength())
@@ -1256,7 +1152,7 @@ FUNCTION regularFromTmpName(tmpname)
   RETURN tmpname
 END FUNCTION
 
-FUNCTION compile_source(fname,proposals)
+PRIVATE FUNCTION compile_source(fname,proposals)
   DEFINE fname STRING
   DEFINE proposals INT
   DEFINE dirname,cmd,cmd1,mess,cparam,line,srcname,compOrForm,tmpName STRING
@@ -1274,7 +1170,7 @@ FUNCTION compile_source(fname,proposals)
   IF isPER OR proposals THEN
     LET cparam=sfmt("%1 %2,%3",cparam,m_cline,m_ccol)
   ELSE
-    IF NOT isPER THEN
+    IF NOT isPER AND m_IsFiddle THEN
       LET cparam="-r"
     END IF
   END IF
@@ -1306,7 +1202,7 @@ FUNCTION compile_source(fname,proposals)
       CALL file_get_output(cmd,compile_arr)
     ELSE
       CALL file_read_in_arr(tmpName,compile_arr)
-      RUN "cat "||tmpName
+      --RUN "cat "||tmpName
     END IF
     LET srcname=regularFromTmpName(fname)
     --DISPLAY "srcname=",srcname
@@ -1330,15 +1226,14 @@ END FUNCTION
 --calls the form compiler in completion mode
 --and makes some computations to present a display array with possible
 --completion tokens
-FUNCTION complete(fname)
-  DEFINE fname STRING
+PRIVATE FUNCTION complete()
   DEFINE compmess STRING
   DEFINE proposal STRING
   DEFINE proparr proparr_t
   DEFINE tok base.StringTokenizer
   DEFINE i,j,len INT
   DEFINE sub STRING
-  LET compmess=compile_source(fname,1)
+  LET compmess=compile_source(m_tmpname,1)
   FOR i=1 TO compile_arr.getLength()
     LET proposal=compile_arr[i]
     IF proposal.getIndexOf("proposal",1)=1 THEN
@@ -1371,11 +1266,31 @@ FUNCTION complete(fname)
   RETURN proparr
 END FUNCTION
 
+FUNCTION appendToLog(title,s)
+  DEFINE title,s,logfile STRING
+  DEFINE ch base.Channel
+  LET logfile=fgl_getenv("FGLCM_LOGFILE")
+  IF logfile IS NULL THEN 
+    RETURN
+  END IF
+  DISPLAY "FGLCM_LOGFILE is:",logfile
+  LET ch=base.Channel.create()
+  TRY
+    CALL ch.openFile(logfile,"a")
+    CALL ch.writeLine(title)
+    CALL ch.writeLine(s)
+    CALL ch.close()
+  CATCH
+    DISPLAY "ERROR appending log:",err_get(status)
+  END TRY
+END FUNCTION
+
 
 FUNCTION err(errstr)
   DEFINE errstr STRING
   CALL fgl_winMessage("Error",errstr,"error")
   DISPLAY "ERROR:",errstr
+  CALL appendToLog("fglcm.err():",errstr)
   EXIT PROGRAM 1
 END FUNCTION
 
@@ -1385,17 +1300,17 @@ FUNCTION myERROR(errstr)
   DISPLAY "ERROR:",errstr
 END FUNCTION
 
-FUNCTION setModified() 
+PRIVATE FUNCTION setModified() 
   IF NOT m_modified THEN
     DISPLAY "setModified() TRUE"
     LET m_modified=TRUE
   END IF
 END FUNCTION
 
-FUNCTION checkChangedArray()
+PRIVATE FUNCTION checkChangedArray()
   DEFINE savelen,len,i INT
   IF m_modified==FALSE THEN
-    --DISPLAY "checkChangedArray() no mod"
+    DISPLAY "checkChangedArray() no mod"
     RETURN FALSE
   END IF
   LET savelen=m_savedlines.getLength()
@@ -1406,7 +1321,7 @@ FUNCTION checkChangedArray()
   END IF
   FOR i=1 TO len
     IF checkChanged(m_savedlines[i],m_orglines[i].line) THEN
-      --DISPLAY sfmt("line:%1 differs '%2'<>'%3'",i,m_savedlines[i],m_orglines[i].line)
+      DISPLAY sfmt("line:%1 differs '%2'<>'%3'",i,m_savedlines[i],m_orglines[i].line)
       RETURN TRUE
     END IF
   END FOR
@@ -1425,7 +1340,7 @@ FUNCTION checkChanged(src,copy2)
   RETURN 0
 END FUNCTION
 
-FUNCTION my_write(fname,internal)
+PRIVATE FUNCTION my_write(fname,internal)
   DEFINE fname STRING
   DEFINE internal BOOLEAN
   IF NOT file_write(fname,internal) THEN
@@ -1436,9 +1351,8 @@ FUNCTION my_write(fname,internal)
   RETURN TRUE
 END FUNCTION
 
-
 --collects the errors and jumps to the first one optionally
-FUNCTION process_compile_errors(fname,jump_to_error)
+PRIVATE FUNCTION process_compile_errors(fname,jump_to_error)
   DEFINE fname STRING
   DEFINE jump_to_error INT
   DEFINE idx,erridx INT
@@ -1462,12 +1376,14 @@ FUNCTION process_compile_errors(fname,jump_to_error)
     IF (firstcolon:=line.getIndexOf(":",start))>0 AND 
       ( (isError:=(line.getIndexOf(":error:",1)<>0)==TRUE) OR line.getIndexOf(":warning:",1)<>0 ) THEN
       LET errfile=line.subString(1,firstcolon-1)
-      LET regular=regularFromTmpName(fname)
-      IF os.Path.baseName(errfile)<>os.Path.baseName(regular) THEN
-        DISPLAY "errfile:",errfile,",regular:",regular
-        DISPLAY "do not report warnings in other files yet to fglcm.js"
-        LET idx=idx+1
-        CONTINUE WHILE
+      IF fname IS NOT NULL THEN
+        LET regular=regularFromTmpName(fname)
+        IF os.Path.baseName(errfile)<>os.Path.baseName(regular) THEN
+          DISPLAY "errfile:",errfile,",regular:",regular
+          DISPLAY "do not report warnings in other files yet to fglcm.js"
+          LET idx=idx+1
+          CONTINUE WHILE
+        END IF
       END IF
       LET secondcolon=line.getIndexOf(":",firstcolon+1)
       LET thirdcolon=line.getIndexOf(":",secondcolon+1)
@@ -1498,6 +1414,9 @@ FUNCTION process_compile_errors(fname,jump_to_error)
           LET m_cmRec.annotations[erridx].to.ch=col2
           LET m_cmRec.annotations[erridx].message=m_error_line
           LET m_cmRec.annotations[erridx].severity=IIF(isError,"error","warning")
+          IF fname IS NULL THEN
+            LET m_cmRec.annotations[erridx].errfile=errfile
+          END IF
           IF jump_to_error THEN
             CALL jump_to_line(linenum,col,line2numstr,col2,FALSE,FALSE)
             LET jump_to_error=FALSE
@@ -1510,7 +1429,7 @@ FUNCTION process_compile_errors(fname,jump_to_error)
   END WHILE
 END FUNCTION
 
-FUNCTION file_read(srcfile)
+PRIVATE FUNCTION file_read(srcfile)
   DEFINE srcfile STRING
   DEFINE ch base.Channel
   DEFINE line STRING
@@ -1543,7 +1462,7 @@ FUNCTION file_read(srcfile)
   RETURN TRUE
 END FUNCTION
 
-FUNCTION file_read_in_arr(txtfile,arr)
+PRIVATE FUNCTION file_read_in_arr(txtfile,arr)
   DEFINE txtfile STRING
   DEFINE arr DYNAMIC ARRAY OF STRING
   DEFINE line STRING
@@ -1565,7 +1484,7 @@ FUNCTION file_read_in_arr(txtfile,arr)
   END TRY
 END FUNCTION
 
-FUNCTION arr2String()
+PRIVATE FUNCTION arr2String()
   DEFINE buf base.StringBuffer
   DEFINE result STRING
   DEFINE len,i INT
@@ -1584,7 +1503,7 @@ FUNCTION arr2String()
   RETURN result
 END FUNCTION
 
-FUNCTION file_write_int(srcfile,mode,internal)
+PRIVATE FUNCTION file_write_int(srcfile,mode,internal)
   DEFINE srcfile STRING
   DEFINE mode STRING
   DEFINE internal BOOLEAN
@@ -1620,7 +1539,7 @@ FUNCTION file_write_int(srcfile,mode,internal)
   RETURN result
 END FUNCTION
 
-FUNCTION file_write(srcfile,internal)
+PRIVATE FUNCTION file_write(srcfile,internal)
   DEFINE srcfile STRING
   DEFINE internal BOOLEAN
   DEFINE start DATETIME YEAR TO FRACTION(2)
@@ -1655,7 +1574,7 @@ END FUNCTION
 
 --should be only called in the accident case
 --eats a full network roundtrip due to the frontcall
-FUNCTION getFullTextAndRepair(fname)
+PRIVATE FUNCTION getFullTextAndRepair(fname)
   DEFINE fname STRING
   DEFINE r RECORD
     full STRING,
@@ -1673,6 +1592,7 @@ FUNCTION getFullTextAndRepair(fname)
   LET bak=sfmt("%1.bak",fname)
   RUN sfmt('cp "%1" "%2"',fname,bak) 
   CALL writeStringToFile(fname,r.full)
+  CALL appendToLog("getFullTextAndRepair:",sfmt("Genero side in:%1, WC side in:%2",bak,fname))
   WHILE TRUE
     MENU ATTRIBUTE(STYLE="dialog",COMMENT="CRC error")
       COMMAND "vimdiff WC vs server"
@@ -1706,6 +1626,7 @@ FUNCTION getFullTextAndRepair(fname)
   END IF
 END FUNCTION
 
+--writes a STRING 'as is' to a file
 FUNCTION writeStringToFile(fname,s)
   DEFINE ch base.Channel
   DEFINE fname,s STRING
@@ -1720,7 +1641,7 @@ FUNCTION writeStringToFile(fname,s)
   CALL ch.close()
 END FUNCTION
 
-FUNCTION checkCRCSum(fname)
+PRIVATE FUNCTION checkCRCSum(fname)
   DEFINE fname STRING
   DEFINE crc BIGINT
   LET crc=getCRCSum(fname)
@@ -1758,14 +1679,14 @@ FUNCTION file_on_mac()
   RETURN _on_mac=="1"
 END FUNCTION
 
-
+#+cuts the extension from a file name
 FUNCTION cut_extension(pname)
   DEFINE pname STRING
   DEFINE basename,ext STRING
   LET basename=pname
   LET ext=os.Path.extension(pname)
   IF ext IS NOT NULL THEN
-    LET basename=pname.subString(1,pname-ext.getLength()+1)
+    LET basename=pname.subString(1,pname.getLength()-(ext.getLength()+1))
   END IF
   RETURN basename
 END FUNCTION
@@ -1773,6 +1694,7 @@ END FUNCTION
 FUNCTION checkFileSave()
   DEFINE ans STRING
   DEFINE dummy INT
+  LET ans="unchanged"
   IF checkChangedArray() THEN
     IF (ans:=fgl_winquestion("fglcm",sfmt("Save changes to %1?",m_title),
          "yes","yes|no|cancel","question",0))="yes" 
@@ -1784,6 +1706,7 @@ FUNCTION checkFileSave()
         END IF
       END IF
       CALL my_write(m_srcfile,FALSE) RETURNING dummy
+      CALL savelines()
       IF m_IsNewFile THEN
         CALL mysetTitle()
         CALL resetNewFile()
@@ -1793,7 +1716,7 @@ FUNCTION checkFileSave()
   RETURN ans
 END FUNCTION
 
-FUNCTION file_new(ext)
+PRIVATE FUNCTION file_new(ext)
   DEFINE ext STRING
   DEFINE cancel BOOLEAN
   DEFINE t TEXT
@@ -1840,15 +1763,56 @@ FUNCTION file_new(ext)
   RETURN ext
 END FUNCTION
 
-FUNCTION setCurrFile(fname,tmpname) --sets m_srcfile
-  DEFINE fname,tmpname STRING
+FUNCTION getSrcFile()
+  RETURN m_srcfile
+END FUNCTION
+
+FUNCTION initSrcFile(fname)
+  DEFINE fname STRING
+  DEFINE ans STRING
+  IF fname IS NULL THEN
+    LET m_srcFile=NULL
+    IF file_new(NULL)==S_CANCEL THEN
+      RETURN FALSE
+    END IF
+  ELSE
+    LET m_srcFile=fname
+    IF NOT file_read(m_srcfile) THEN
+      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),
+          "yes","yes|no|cancel","question",0))=S_CANCEL 
+      THEN
+        RETURN FALSE
+      END IF
+      IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
+        RETURN 1
+      END IF
+      IF ans="yes" THEN
+        IF NOT my_write(m_srcfile,FALSE) THEN
+          RETURN FALSE
+        END IF
+      ELSE
+        RETURN FALSE
+      END IF
+    END IF
+  END IF
+  CALL setCurrFile(m_srcfile)
+  CALL savelines()
+  RETURN TRUE
+END FUNCTION
+
+PRIVATE FUNCTION setCurrFile(fname
+--,tmpname
+  ) --sets m_srcfile
+  DEFINE fname STRING
+  --,tmpname STRING
   LET m_srcfile=fname
   CALL addToRecents()
-  CALL delete_tmpfiles(tmpname)
-  LET tmpname = getTmpFileName(m_srcfile)
+  --CALL delete_tmpfiles(tmpname)
+  CALL delete_tmpfiles()
+  LET m_tmpname = getTmpFileName(m_srcfile)
   CALL mysetTitle()
-  RETURN tmpname
 END FUNCTION
+
 
 FUNCTION updateRecentsCursor(cursor1,cursor2)
   DEFINE cursor1 RECORD
@@ -1917,18 +1881,20 @@ FUNCTION resetNewFile()
   LET m_NewFileExt=NULL
 END FUNCTION
 
-FUNCTION delete_tmpfiles(tmpname)
-  DEFINE tmpname STRING
+FUNCTION delete_tmpfiles(
+  --tmpname
+  )
+  --DEFINE tmpname STRING
   DEFINE dummy INT
-  IF tmpname IS NULL THEN
+  IF m_tmpname IS NULL THEN
     RETURN
   END IF
-  CALL os.Path.delete(tmpname) RETURNING dummy
-  CASE os.Path.extension(tmpname)
+  CALL os.Path.delete(m_tmpname) RETURNING dummy
+  CASE os.Path.extension(m_tmpname)
   WHEN "per"
-    CALL os.Path.delete(cut_extension(tmpname)||".42f") RETURNING dummy
+    CALL os.Path.delete(cut_extension(m_tmpname)||".42f") RETURNING dummy
   WHEN "4gl"
-    CALL os.Path.delete(cut_extension(tmpname)||".42m") RETURNING dummy
+    CALL os.Path.delete(cut_extension(m_tmpname)||".42m") RETURNING dummy
   END CASE
 END FUNCTION
 
@@ -2016,7 +1982,7 @@ FUNCTION fglped_filedlg()
   RETURN fname
 END FUNCTION
 
-FUNCTION split_src(src)
+PRIVATE FUNCTION split_src(src)
   DEFINE src,line STRING
   DEFINE tok base.StringTokenizer
   DEFINE linenum INT
@@ -2040,60 +2006,10 @@ FUNCTION split_src(src)
   END IF
   }
 END FUNCTION
-{
-FUNCTION initCRC32Table()
-  DEFINE c,cshift,n,magic,k INT
-  LET magic=util.Integer.parseHexString("EDB88320")
-  FOR n=1 TO 256
-    LET c=n-1
-    FOR k=1 TO 8
-      LET cshift=util.Integer.shiftRight(c,1)
-      LET c=IIF(util.Integer.testBit(c,0),
-                util.Integer.xor(magic,cshift),
-                cshift)
-    END FOR
-    LET m_CRCTable[n] = c
-    --DISPLAY "m_CRCTable[",n-1,",]=",c
-  END FOR
-END FUNCTION
 
-FUNCTION crc32(str)
-  DEFINE str STRING
-  DEFINE big BIGINT
-  DEFINE start DATETIME YEAR TO FRACTION(2)
-  LET start=CURRENT
-  LET big=crc32int(str)
-  DISPLAY sfmt("time for crc32 of %1 bytes:%2",str.getLength(),CURRENT-start)
-  RETURN big
-END FUNCTION
-
---CRC32 algorithm in 4GL
---it does not work for a "char" semantic encoded STRING
-FUNCTION crc32int(str)
-  DEFINE str,ch STRING
-  DEFINE crc,len,i,code,idx,res INT
-  DEFINE big BIGINT
-  LET crc=-1
-  LET len=str.getLength()
-  
-  FOR i = 1 TO len
-    LET ch=str.getCharAt(i)
-    LET code=ORD(ch)
-    LET idx=util.Integer.and(util.Integer.xor(crc,code),255)
-    LET crc= util.Integer.xor(util.Integer.shiftRight(crc,8),m_CRCTable[idx+1])
-  END FOR
-  
-  LET res=util.Integer.xor(crc,-1)
-  LET big=res
-  IF util.Integer.testBit(res,31) THEN --highest bit set
-    --we need to add 1000 0000 0000 0000 0000 0000 0000 0000
-    -- == 0x80000000
-    LET big=HIGHBIT32+util.Integer.clearBit(res,31)
-  END IF
-  RETURN big
-END FUNCTION
-}
-FUNCTION savelines()
+# syncs m_orglines into m_savedlines
+# m_savedline represent the original file
+PRIVATE FUNCTION savelines()
   DEFINE i,len INT
   CALL m_savedlines.clear()
   LET len=m_orglines.getLength()
@@ -2103,7 +2019,7 @@ FUNCTION savelines()
   LET m_modified=FALSE
 END FUNCTION
 
-FUNCTION restorelines()
+PRIVATE FUNCTION restorelines()
   DEFINE i,len INT
   CALL m_orglines.clear()
   LET len=m_savedlines.getLength()
@@ -2114,7 +2030,7 @@ FUNCTION restorelines()
   LET m_modified=FALSE
 END FUNCTION
 
-FUNCTION loadKeywords()
+PRIVATE FUNCTION loadKeywords()
   DEFINE start DATETIME YEAR TO FRACTION(2)
   LET start=CURRENT
   CALL loadKeywordsFor("fgl","4gl")
@@ -2125,7 +2041,7 @@ END FUNCTION
 #+ looks up the vim syntax files
 #+ pre 3.10: $FGLDIR/lib/fgl.vim|per.vim
 #+ since 3.10: $FGLDIR/vimfiles/syntax/fgl.vim|per.vim
-FUNCTION loadKeywordsFor(vimmode,mode)
+PRIVATE FUNCTION loadKeywordsFor(vimmode,mode)
   DEFINE vimmode,mode,vimfile,vimfile2 STRING
   DEFINE sep,fgldir,cmdir,templ STRING
   LET cmdir=mydir(my_arg_val(0))
@@ -2149,7 +2065,7 @@ END FUNCTION
 
 #+ merges keywords from the vim syntax files
 #+ into the codemirror mode template file
-FUNCTION mergekeywords(cmdir,mode,templ,vimfile)
+PRIVATE FUNCTION mergekeywords(cmdir,mode,templ,vimfile)
   DEFINE cmdir,mode,templ,vimfile STRING
   DEFINE line,keyword,destfile,sep STRING
   DEFINE c,d base.Channel
@@ -2190,4 +2106,132 @@ FUNCTION mergekeywords(cmdir,mode,templ,vimfile)
   END WHILE
   CALL c.close()
   CALL d.close()
+END FUNCTION
+
+FUNCTION get_program_output(program,merge_stdout_and_stderr)
+  DEFINE program STRING
+  DEFINE merge_stdout_and_stderr BOOLEAN
+  DEFINE tmpName,errName STRING
+  DEFINE code INTEGER
+  DEFINE ok BOOLEAN
+  DEFINE t TEXT
+  DEFINE result STRING
+  LET tmpName=os.Path.makeTempName()
+  IF merge_stdout_and_stderr THEN
+    LET program=program,'> "',tmpName,'" 2>&1'
+  ELSE
+    LET errName=os.Path.makeTempName()
+    LET program=program,'> "',tmpName,'" 2>"',errName,'"'
+  END IF
+  RUN program RETURNING code
+  IF code THEN
+    LOCATE t IN FILE IIF(merge_stdout_and_stderr,tmpName,errName)
+  ELSE
+    LOCATE t IN FILE tmpName
+    LET ok=TRUE
+  END IF
+  LET result=t
+  CALL os.Path.delete(tmpName) RETURNING code
+  IF errName IS NOT NULL THEN
+    CALL os.Path.delete(errName) RETURNING code
+  END IF
+  RETURN ok,result
+END FUNCTION
+
+FUNCTION process_make_results(output)
+  DEFINE output,line,errfile STRING
+  DEFINE tok base.StringTokenizer
+  DEFINE i,linenum INT
+  CALL compile_arr.clear()
+  LET tok=base.StringTokenizer.createExt(output,"\n","\\",TRUE)
+  LET linenum=1
+  WHILE tok.hasMoreTokens()
+    LET line=tok.nextToken()
+    LET compile_arr[linenum]=IIF(line IS NULL," " CLIPPED,line)
+    LET linenum=linenum+1
+  END WHILE
+  CALL initialize_when(TRUE)
+  CALL process_compile_errors(NULL,FALSE)
+  FOR i=1 TO m_cmRec.annotations.getLength()
+    LET errfile=m_cmRec.annotations[i].errfile
+    IF os.Path.exists(errfile) THEN
+      IF os.Path.fullPath(errfile)==os.Path.fullPath(m_srcfile) THEN
+        --error/warning is in in the current file, just go to the location
+        LET m_cmRec.cursor1.*=m_cmRec.annotations[i].from.*
+        LET m_cmRec.cursor2.*=m_cmRec.annotations[i].to.*
+        CALL flush_cm()
+        RETURN TRUE
+      ELSE
+        CALL doFileOpen(errfile)
+        RETURN TRUE
+      END IF
+    END IF
+  END FOR
+  RETURN FALSE
+END FUNCTION
+
+# merges a given ActionDefaultList into the existing ActionDefaultList
+# of the given form
+FUNCTION mergeADList(f,adlist)
+  DEFINE f ui.Form
+  DEFINE adlist,tmpName STRING
+  DEFINE fNode,nadlist,nadlist2,nchild om.DomNode
+  DEFINE nlist om.NodeList
+  LET fNode=f.getNode()
+  LET nlist=fNode.selectByTagName("ActionDefaultList")
+  IF nlist.getLength()>0 THEN
+    LET nadlist=nlist.item(1)
+  END IF
+  CALL f.loadActionDefaults(adlist)
+  IF nadlist IS NULL THEN
+    RETURN
+  END IF
+  LET nlist=fNode.selectByTagName("ActionDefaultList")
+  IF nlist.getLength()>0 THEN
+    LET nadlist2=nlist.item(1)
+  END IF
+  WHILE (nchild:=nadlist2.getFirstChild()) IS NOT NULL
+    CALL nadlist2.removeChild(nchild)
+    CALL nadlist.appendChild(nchild)
+    LET nchild=nchild.getNext()
+  END WHILE
+  LET tmpName=os.Path.makeTempName()
+  CALL os.Path.delete(tmpName) RETURNING status
+  LET tmpName=tmpName,".4ad"
+  DISPLAY "tmpName:",tmpName
+  CALL nadlist.writeXml(tmpName)
+  CALL f.loadActionDefaults(tmpName)
+  CALL os.Path.delete(tmpName) RETURNING status
+END FUNCTION
+
+FUNCTION mergeTopMenu(f,topmenu)
+  DEFINE f ui.Form
+  DEFINE topmenu,tmpName STRING
+  DEFINE fNode,ntm1,ntm2,nchild om.DomNode
+  DEFINE nlist om.NodeList
+  LET fNode=f.getNode()
+  LET nlist=fNode.selectByTagName("TopMenu")
+  IF nlist.getLength()>0 THEN
+    LET ntm1=nlist.item(1)
+  END IF
+  CALL f.loadTopMenu(topmenu)
+  IF ntm1 IS NULL THEN
+    RETURN --there wasn't a top menu previously
+  END IF
+  LET nlist=fNode.selectByTagName("TopMenu")
+  IF nlist.getLength()>0 THEN
+    LET ntm2=nlist.item(1)
+  END IF
+  WHILE (nchild:=ntm2.getFirstChild()) IS NOT NULL
+    CALL ntm2.removeChild(nchild)
+    CALL ntm1.appendChild(nchild)
+    LET nchild=nchild.getNext()
+  END WHILE
+  LET tmpName=os.Path.makeTempName()
+  CALL os.Path.delete(tmpName) RETURNING status
+  LET tmpName=tmpName,".4tm"
+  DISPLAY "tmpName:",tmpName
+  CALL ntm1.writeXml(tmpName)
+  CALL f.loadTopMenu(tmpName)
+  CALL os.Path.delete(tmpName) RETURNING status
 END FUNCTION

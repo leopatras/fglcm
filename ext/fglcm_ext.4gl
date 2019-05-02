@@ -1,6 +1,9 @@
 FUNCTION init()
 END FUNCTION
 
+FUNCTION initMainWindow()
+END FUNCTION
+
 FUNCTION fglcm_ext_form_init(f)
   DEFINE f ui.Form
   DEFINE n om.DomNode

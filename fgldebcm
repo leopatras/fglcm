@@ -26,5 +26,5 @@ if [ "$1" == "-p" ]
 then
   exec fgldeb "$@" 
 else
-  exec fgldeb $FGLCMDIR/cm.42m "$@" 
+  exec fgldeb $FGLCMDIR/fglcm_main.42m "$@" 
 fi 
