@@ -20,7 +20,7 @@
   </Style>
   <Style name="Window.dialog_resize">
      <StyleAttribute name="windowType" value="modal" />
-     <StyleAttribute name="XwindowSheet" value="yes" />
+     <StyleAttribute name="xwindowSheet" value="yes" />
      <StyleAttribute name="sizable" value="yes" />
      <StyleAttribute name="position" value="center2" />
      <StyleAttribute name="actionPanelPosition" value="none" />
@@ -40,7 +40,7 @@
   </Style>
   <Style name="Window.dialog">
      <StyleAttribute name="windowType" value="modal" />
-     <StyleAttribute name="windowSheet" value="yes" />
+     <StyleAttribute name="xwindowSheet" value="yes" />
      <StyleAttribute name="sizable" value="yes" />
      <StyleAttribute name="position" value="center2" />
      <StyleAttribute name="actionPanelPosition" value="bottom" />

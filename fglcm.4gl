@@ -5,6 +5,8 @@ IMPORT FGL fgldialog
 --IMPORT FGL fglcm_core
 IMPORT FGL fglped_md_filedlg
 IMPORT FGL fglped_fileutils
+&define _ASSERT(x) IF NOT NVL(x,0) THEN CALL assert(#x) END IF
+&define _ASSERT_MSG(x,msg) IF NOT NVL(x,0) THEN CALL assert_with_msg(#x,msg) END IF
 --the webcomponents value->used in the main INPUT
 PUBLIC DEFINE m_cm STRING
 --how many extension actions are there
@@ -20,10 +22,9 @@ DEFINE m_error_line STRING
 DEFINE m_cline,m_ccol INT
 DEFINE m_srcfile STRING
 DEFINE m_tmpname STRING
-DEFINE m_title STRING
+DEFINE m_title,m_full_title STRING
 DEFINE compile_arr DYNAMIC ARRAY OF STRING
 DEFINE m_CRCProg STRING
---DEFINE m_CRCTable ARRAY[256] OF INTEGER
 DEFINE m_lastCRC BIGINT
 DEFINE m_modified BOOLEAN
 DEFINE m_IsNewFile BOOLEAN
@@ -114,6 +115,43 @@ END RECORD
 DEFINE m_cmRec CmType
 DEFINE m_arg_0 STRING
 DEFINE m_args DYNAMIC ARRAY OF STRING
+DEFINE m_qa_chooseFileName STRING
+DEFINE m_qa_saveAsFileName STRING
+DEFINE m_qa_file_new_ext STRING
+
+FUNCTION resetForQA() --reset all vars
+  INITIALIZE m_cm TO NULL
+  INITIALIZE m_error_line TO NULL
+  LET m_cline = 0
+  LET m_ccol  = 0
+  INITIALIZE m_srcfile TO NULL
+  INITIALIZE m_tmpname TO NULL
+  INITIALIZE m_title,m_full_title TO NULL
+  CALL compile_arr.clear()
+  INITIALIZE m_CRCProg TO NULL
+  LET m_lastCRC=NULL
+  LET m_modified = FALSE
+  LET m_IsNewFile = FALSE
+  LET m_mainFormOpen = FALSE
+  LET m_previewHidden = FALSE
+  INITIALIZE m_NewFileExt TO NULL
+  LET m_cmdIdx = 0
+  INITIALIZE m_lastCompiled4GL TO NULL
+  INITIALIZE m_lastCompiledPER TO NULL
+  INITIALIZE m_locationhref TO NULL
+  INITIALIZE m_extURL TO NULL --external form viewer URL
+  INITIALIZE _on_mac TO NULL --cache the file_on_mac
+  LET m_IsFiddle = FALSE
+  LET m_InitSeen = FALSE
+  CALL m_recents.clear()
+  INITIALIZE m_lastEditorInstruction TO NULL
+  CALL m_savedlines.clear()
+  CALL m_orglines.clear()
+  INITIALIZE m_cmRec TO NULL
+  INITIALIZE m_arg_0 TO NULL
+  CALL m_args.clear()
+  INITIALIZE m_qa_chooseFileName TO NULL
+END FUNCTION
 
 FUNCTION init_args()
   DEFINE i INT
@@ -160,20 +198,23 @@ FUNCTION init()
   END IF
 END FUNCTION
 
-FUNCTION before_input(d)
+FUNCTION before_input(d,activateAndHideActions)
   DEFINE d ui.Dialog
+  DEFINE activateAndHideActions BOOLEAN
   DEFINE i INT
-  CALL d.setActionActive("run",FALSE)
-  CALL setPreviewActionActive(FALSE)
-  CALL d.setActionActive("main4gl",m_IsFiddle)
-  CALL d.setActionActive("mainper",m_IsFiddle)
-  CALL d.setActionActive("browse_demos",m_IsFiddle)
-  CALL d.setActionHidden("main4gl",NOT m_IsFiddle)
-  CALL d.setActionHidden("mainper",NOT m_IsFiddle)
-  CALL d.setActionHidden("browse_demos",NOT m_IsFiddle)
-  FOR i=1 TO numExtensionActions
-    CALL d.setActionHidden(sfmt("fglcm_ext%1",i),TRUE)
-  END FOR
+  IF activateAndHideActions THEN
+    CALL d.setActionActive("run",FALSE)
+    CALL setPreviewActionActive(FALSE)
+    CALL d.setActionActive("main4gl",m_IsFiddle)
+    CALL d.setActionActive("mainper",m_IsFiddle)
+    CALL d.setActionActive("browse_demos",m_IsFiddle)
+    CALL d.setActionHidden("main4gl",NOT m_IsFiddle)
+    CALL d.setActionHidden("mainper",NOT m_IsFiddle)
+    CALL d.setActionHidden("browse_demos",NOT m_IsFiddle)
+    FOR i=1 TO numExtensionActions
+      CALL d.setActionHidden(sfmt("fglcm_ext%1",i),TRUE)
+    END FOR
+  END IF
   CALL initialize_when(TRUE)
   CALL compileTmp(TRUE)
   CALL display_full(FALSE,FALSE)
@@ -195,13 +236,19 @@ FUNCTION deleteLog()
   END IF
 END FUNCTION
 
-FUNCTION doClose()
+FUNCTION doClose(exit)
+  DEFINE exit BOOLEAN
   IF checkFileSave()=S_CANCEL THEN
     RETURN
   END IF
   CALL cleanup()
+  IF NOT exit THEN
+    CLOSE WINDOW fglcm
+  END IF
   CALL deleteLog()
-  EXIT PROGRAM 0
+  IF exit THEN
+    EXIT PROGRAM 0
+  END IF
 END FUNCTION
 
 FUNCTION checkFiddleBar()
@@ -285,7 +332,13 @@ FUNCTION hideOrShowPreview()
 END FUNCTION
 
 FUNCTION openMainWindow()
-  CLOSE WINDOW screen
+  DEFINE w ui.Window
+  CALL fgl_refresh()
+  LET w=ui.Window.forName("screen")
+  IF w IS NOT NULL THEN
+    DISPLAY "close screen"
+    CLOSE WINDOW screen
+  END IF
   OPEN WINDOW fglcm WITH FORM "fglcm"
   LET m_mainFormOpen=TRUE
   CALL checkFiddleBar()
@@ -354,7 +407,7 @@ FUNCTION doFileOpen(cname)
 END FUNCTION
 
 FUNCTION doFileSave()
-  IF isNewFile() THEN
+  IF m_srcfile IS NULL THEN
     CALL doFileSaveAs()
     RETURN
   END IF
@@ -362,7 +415,11 @@ FUNCTION doFileSave()
     CALL fgl_winmessage(S_ERROR,sfmt("Can't write:%1",m_srcfile),IMG_ERROR)
     --TODO: handle this worst case 
   ELSE
-    DISPLAY "saved"
+    IF m_IsNewFile THEN
+      CALL resetNewFile()
+      CALL mysetTitle()
+    END IF
+    DISPLAY "saved to:",m_srcfile
     CALL savelines()
     CALL initialize_when(TRUE)
     CALL compileTmp(FALSE)
@@ -388,11 +445,13 @@ END FUNCTION
 
 FUNCTION doFileNew()
   DEFINE ans STRING
-  IF (ans:=checkFileSave())=S_CANCEL THEN 
+  IF (ans:=checkFileSave())=S_CANCEL THEN
+    DISPLAY "doFileNew checkFileSave S_CANCEL"
     RETURN
   END IF
   CALL initialize_when(TRUE)
   IF file_new(NULL)==S_CANCEL THEN 
+    DISPLAY "doFileNew file_new S_CANCEL"
     RETURN
   END IF
   CALL display_full(FALSE,FALSE)
@@ -435,6 +494,9 @@ END FUNCTION
 
 FUNCTION normalizeName(pwd,name)
   DEFINE pwd,name,parent,pre STRING
+  IF name IS NULL THEN
+    RETURN "(NULL)"
+  END IF
   IF name.getIndexOf(pwd,1)==1 THEN
     --print short names for current dir and sub dirs
     RETURN name.subString(pwd.getLength()+2,name.getLength())
@@ -457,6 +519,7 @@ PRIVATE FUNCTION displayPickList()
   LET full=os.Path.fullPath(m_srcfile)
   LET pwd=os.Path.pwd()
   FOR i=1 TO m_recents.getLength()
+    _ASSERT(m_recents[i].fileName IS NOT NULL)
     IF NOT full.equals(m_recents[i].fileName) THEN
       LET el=m_recents[i].fileName
       LET el=normalizeName(pwd,el)
@@ -494,7 +557,7 @@ FUNCTION openFromPickList()
     LET cname=open_load(cname)
   END IF
   IF cname IS NOT NULL THEN
-    --MY_ASSERT(m_recents.getLength()>=1)
+    _ASSERT(m_recents.getLength()>=1)
     LET re.*=m_recents[1].*
     LET m_cmRec.cursor1.*=re.cursor1.*
     LET m_cmRec.cursor2.*=re.cursor2.*
@@ -897,7 +960,7 @@ END FUNCTION
 
 FUNCTION setInitSeen()
   LET m_InitSeen=TRUE
-  DISPLAY "init seen"
+  CALL log("setInitSeen")
   DISPLAY m_cm TO cm
 END FUNCTION
 
@@ -907,7 +970,7 @@ FUNCTION fcsync() --called if our topmenu fired an action
   --the drawback: this costs an additional client server round trip
   DEFINE newVal STRING
   IF NOT m_InitSeen THEN
-    DISPLAY "fcsync:no init seen yet"
+    CALL log("fcsync:no init seen yet")
     RETURN
   END IF
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","fcsync"],[newVal])
@@ -922,16 +985,12 @@ PRIVATE FUNCTION syncInt(newVal)
   DEFINE newVal,line STRING
   DEFINE orgnum,idx,i,j,z,len,insertpos INT
   DEFINE cmRec CmType
-  DISPLAY "newVal:",newVal
-  IF newVal IS NULL THEN
-    DISPLAY "!!!NULL!!!"
-    CALL fgl_winmessage("Error","syncInt was called with NULL","error")
-    RETURN 
-  END IF
+  CALL log(sfmt("syncInt newVal:",newVal))
+  _ASSERT(newVal IS NOT NULL)
   LET m_lastEditorInstruction=newVal
   CALL util.JSON.parse(newVal,cmRec)
-  DISPLAY "cm:",util.JSON.stringify(cmRec)
-  DISPLAY ">>----"
+  --DISPLAY "cm:",util.JSON.stringify(cmRec)
+  --DISPLAY ">>----"
   --LET src=cmRec.full
   LET m_cline=cmRec.cursor1.line+1
   LET m_ccol=cmRec.cursor1.ch+1
@@ -943,7 +1002,7 @@ PRIVATE FUNCTION syncInt(newVal)
     IF orgnum>=1 AND orgnum<=m_orglines.getLength() THEN
       LET line=cmRec.modified[i].line
       IF checkChanged(line,m_orglines[orgnum].line) THEN
-        DISPLAY sfmt("patch line:%1 from:'%2' to:'%3'",orgnum,m_orglines[orgnum].line,line)
+        --DISPLAY sfmt("patch line:%1 from:'%2' to:'%3'",orgnum,m_orglines[orgnum].line,line)
         CALL setModified()
         LET m_orglines[orgnum].line=line
       END IF
@@ -987,11 +1046,10 @@ PRIVATE FUNCTION syncInt(newVal)
     END WHILE
   END FOR
   LET m_lastCRC=cmRec.crc
-  DISPLAY sfmt("len:%1, lineCount:%2,crc:",cmRec.len,cmRec.lineCount,m_cmRec.crc)
+  CALL log(sfmt("len:%1, lineCount:%2,crc:",cmRec.len,cmRec.lineCount,m_cmRec.crc))
   IF m_orglines.getLength()<>cmRec.lineCount THEN
     CALL err(SFMT("linecount local %1 != linecount remote %2",m_orglines.getLength(),cmRec.lineCount))
   END IF
-  DISPLAY ">>----"
   --renumber and compute character count
   LET len=0
   FOR i=m_orglines.getLength() TO 1 STEP -1
@@ -1073,7 +1131,7 @@ PRIVATE FUNCTION display_full(initialize,flush)
   DEFINE ext,basename STRING
   CALL initialize_when(initialize)
   LET m_cmRec.full=arr2String()
-  IF m_IsNewFile THEN
+  IF m_IsNewFile AND m_srcfile IS NULL THEN
     LET m_cmRec.fileName=sfmt("newfile%1.%2",m_cmdIdx,m_NewFileExt)
     LET m_cmRec.extension=m_NewFileExt
   ELSE
@@ -1513,6 +1571,7 @@ PRIVATE FUNCTION file_write_int(srcfile,mode,internal)
   DEFINE line STRING
   LET  ch=base.channel.create()
   CALL ch.setDelimiter("")
+  --DISPLAY "file_write_int:",os.Path.fullPath(srcfile)
   WHENEVER ERROR CONTINUE
   CALL ch.openFile(srcfile,mode)
   --CALL ch.setDelimiter("")
@@ -1529,7 +1588,7 @@ PRIVATE FUNCTION file_write_int(srcfile,mode,internal)
       ELSE
         --internal and last line: avoid the newline problem
         LET line=m_orglines[idx].line
-        DISPLAY sfmt("write last line %1 '%2'",idx,line)
+        --DISPLAY sfmt("write last line %1 '%2'",idx,line)
         CALL ch.writeNoNL(line)
       END IF
     END FOR
@@ -1699,7 +1758,7 @@ FUNCTION checkFileSave()
     IF (ans:=fgl_winquestion("fglcm",sfmt("Save changes to %1?",m_title),
          "yes","yes|no|cancel","question",0))="yes" 
     THEN
-      IF isNewFile() THEN
+      IF m_srcfile IS NULL THEN
         LET m_srcfile=fglped_saveasdlg(m_srcfile)
         IF m_srcfile IS NULL THEN
           RETURN S_CANCEL
@@ -1708,18 +1767,37 @@ FUNCTION checkFileSave()
       CALL my_write(m_srcfile,FALSE) RETURNING dummy
       CALL savelines()
       IF m_IsNewFile THEN
-        CALL mysetTitle()
         CALL resetNewFile()
+        CALL mysetTitle()
       END IF
+    END IF
+  ELSE
+    IF m_IsNewFile AND m_srcfile IS NOT NULL THEN
+      CALL log(sfmt("delete '%1' because it was left virgin",m_srcfile))
+      CALL os.Path.delete(m_srcfile) RETURNING status
     END IF
   END IF
   RETURN ans
+END FUNCTION
+
+FUNCTION log(msg)
+  DEFINE msg STRING
+  DISPLAY "LOG:",msg
+END FUNCTION
+
+FUNCTION qaSetFileNewExt(ext)
+  DEFINE ext STRING
+  LET m_qa_file_new_ext=ext
 END FUNCTION
 
 PRIVATE FUNCTION file_new(ext)
   DEFINE ext STRING
   DEFINE cancel BOOLEAN
   DEFINE t TEXT
+  IF m_qa_file_new_ext IS NOT NULL THEN
+    LET ext=m_qa_file_new_ext
+    LET m_qa_file_new_ext=NULL
+  END IF  
   IF ext IS NULL THEN
     OPEN WINDOW file_new WITH FORM "fglcm_filenew" ATTRIBUTE(TEXT="Please choose a File type")
     MENU 
@@ -1767,9 +1845,22 @@ FUNCTION getSrcFile()
   RETURN m_srcfile
 END FUNCTION
 
+FUNCTION canWrite(fname)
+  DEFINE fname STRING
+  DEFINE c base.Channel
+  LET c=base.Channel.create()
+  TRY
+    CALL c.openFile(fname,"w")
+  CATCH
+    RETURN FALSE
+  END TRY
+  CALL c.close()
+  CALL os.Path.delete(fname) RETURNING status
+  RETURN TRUE
+END FUNCTION
+
 FUNCTION initSrcFile(fname)
   DEFINE fname STRING
-  DEFINE ans STRING
   IF fname IS NULL THEN
     LET m_srcFile=NULL
     IF file_new(NULL)==S_CANCEL THEN
@@ -1778,19 +1869,15 @@ FUNCTION initSrcFile(fname)
   ELSE
     LET m_srcFile=fname
     IF NOT file_read(m_srcfile) THEN
-      IF (ans:=fgl_winquestion("fglcm",sfmt("The file \"%1\" cannot be found, create new?",m_srcfile),
-          "yes","yes|no|cancel","question",0))=S_CANCEL 
-      THEN
-        RETURN FALSE
-      END IF
-      IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
-        RETURN 1
-      END IF
-      IF ans="yes" THEN
+      IF NOT os.Path.exists(m_srcfile) AND canWrite(m_srcfile) THEN
+        IF file_new(os.Path.extension(m_srcfile))==S_CANCEL THEN
+          RETURN FALSE
+        END IF
         IF NOT my_write(m_srcfile,FALSE) THEN
           RETURN FALSE
         END IF
       ELSE
+        CALL fgl_winmessage("fglcm",sfmt('The file "%1" does not exist and is also not usable for a new file (not writable)',fname),"error") 
         RETURN FALSE
       END IF
     END IF
@@ -1800,14 +1887,10 @@ FUNCTION initSrcFile(fname)
   RETURN TRUE
 END FUNCTION
 
-PRIVATE FUNCTION setCurrFile(fname
---,tmpname
-  ) --sets m_srcfile
+PRIVATE FUNCTION setCurrFile(fname) --sets m_srcfile
   DEFINE fname STRING
-  --,tmpname STRING
   LET m_srcfile=fname
   CALL addToRecents()
-  --CALL delete_tmpfiles(tmpname)
   CALL delete_tmpfiles()
   LET m_tmpname = getTmpFileName(m_srcfile)
   CALL mysetTitle()
@@ -1823,8 +1906,10 @@ FUNCTION updateRecentsCursor(cursor1,cursor2)
     line INT,
     ch INT
   END RECORD
-  --MY_ASSERT(m_recents.getLength()>=1)
-  --MY_ASSERT(m_recents[1]==os.Path.fullPath(m_srcfile)
+  IF m_recents.getLength()==0 OR m_srcfile IS NULL THEN
+    RETURN
+  END IF
+  _ASSERT(m_recents[1].fileName==os.Path.fullPath(m_srcfile))
   LET m_recents[1].cursor1.*=cursor1.*
   LET m_recents[1].cursor2.*=cursor2.*
 END FUNCTION
@@ -1881,10 +1966,7 @@ FUNCTION resetNewFile()
   LET m_NewFileExt=NULL
 END FUNCTION
 
-FUNCTION delete_tmpfiles(
-  --tmpname
-  )
-  --DEFINE tmpname STRING
+FUNCTION delete_tmpfiles()
   DEFINE dummy INT
   IF m_tmpname IS NULL THEN
     RETURN
@@ -1899,12 +1981,24 @@ FUNCTION delete_tmpfiles(
 END FUNCTION
 
 FUNCTION mysetTitle()
-  IF isNewFile() THEN
+  DEFINE newfile STRING
+  IF m_srcfile IS NULL THEN
     LET m_title="Unnamed"
   ELSE
     LET m_title=os.Path.baseName(m_srcfile)
   END IF
-  CALL fgl_setTitle(sfmt("%1 - fglcm",m_title))
+  LET newfile=IIF(isNewFile()," [New File]","")
+  LET m_full_title=sfmt("%1 - fglcm%2",m_title,newfile)
+  CALL fgl_setTitle(m_full_title)
+END FUNCTION
+
+FUNCTION mygetTitle()
+  RETURN m_full_title
+END FUNCTION
+
+FUNCTION qaSetFileSaveAsFileName(fname)
+  DEFINE fname STRING
+  LET m_qa_saveAsFileName=fname
 END FUNCTION
 
 FUNCTION fglped_saveasdlg(fname)
@@ -1912,6 +2006,11 @@ FUNCTION fglped_saveasdlg(fname)
   DEFINE filename,ext,newext,lst STRING
   DEFINE r1 FILEDLG_RECORD
   --CALL fgl_winmessage("Info",sfmt("fglped_saveasdlg %1",fname),"info")
+  IF m_qa_saveAsFileName IS NOT NULL THEN
+    LET fname=m_qa_saveAsFileName
+    LET m_qa_saveAsFileName=NULL
+    RETURN fname
+  END IF
   IF m_IsNewFile THEN
     LET ext=m_NewFileExt
   ELSE
@@ -1952,17 +2051,14 @@ FUNCTION fglped_saveasdlg(fname)
   RETURN filename
 END FUNCTION
 
-{
-FUNCTION fglped_filedlg()
-  DEFINE filename STRING
-  CALL ui.Interface.frontCall("standard","openfile", [os.Path.pwd(), "All Files", "*", "Open File" ], 
-    [filename])
-  RETURN filename
-END FUNCTION
-}
 FUNCTION fglped_filedlg()
   DEFINE fname STRING
   DEFINE r1 FILEDLG_RECORD
+  IF m_qa_chooseFileName IS NOT NULL THEN
+    LET fname=m_qa_chooseFileName
+    LET m_qa_chooseFileName=NULL
+    RETURN fname
+  END IF
   IF _isLocal() THEN
     CALL ui.interface.frontCall("standard","openfile",[os.Path.pwd(),"Form Files","*.per",
       "Please choose a form"],[fname])
@@ -2234,4 +2330,49 @@ FUNCTION mergeTopMenu(f,topmenu)
   CALL ntm1.writeXml(tmpName)
   CALL f.loadTopMenu(tmpName)
   CALL os.Path.delete(tmpName) RETURNING status
+END FUNCTION
+
+FUNCTION assert(assertion_body)
+  DEFINE assertion_body STRING
+  CALL to_stderr(sfmt("ERROR: assertion failed:%1\nstack:\n%2",assertion_body,base.Application.getStackTrace()))
+  EXIT PROGRAM 1
+END FUNCTION
+
+FUNCTION assert_with_msg(assertion_body,msg)
+  DEFINE assertion_body,msg STRING
+  CALL to_stderr(sfmt("ERROR: assertion failed:%1,%2\nstack:\n%3",assertion_body,msg,base.Application.getStackTrace()))
+  EXIT PROGRAM 1
+END FUNCTION
+
+FUNCTION to_stderr(s)
+   DEFINE s STRING
+   DEFINE c base.Channel
+   LET c = base.Channel.create()
+   CALL c.openFile("<stderr>", "w")
+   CALL c.writeLine(s)
+END FUNCTION
+
+FUNCTION setQAChooseFileName(fname)
+  DEFINE fname STRING
+  LET m_qa_chooseFileName=fname
+END FUNCTION
+
+FUNCTION qaSendInput(txt)
+  DEFINE txt STRING
+  CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","qaSendInput",txt],[])
+END FUNCTION 
+
+FUNCTION qaReadFile(filename)
+  DEFINE filename STRING
+  DEFINE content STRING
+  DEFINE t TEXT
+  _ASSERT( os.Path.exists(filename) )
+  LOCATE t IN FILE filename
+  LET content=t
+  RETURN content
+END FUNCTION
+
+FUNCTION qaSendAction(actionName)
+  DEFINE actionName STRING
+  CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","qaSendAction",actionName],[])
 END FUNCTION

@@ -3,10 +3,11 @@ IMPORT FGL fglcm
 IMPORT FGL fglcm_ext
 MAIN
   CALL fglcm.init_args()
-  CALL main2()
+  CALL main2(TRUE)
 END MAIN
 
-FUNCTION main2()
+FUNCTION main2(enter_main_loop)
+  DEFINE enter_main_loop BOOLEAN
   CALL fglcm.init()
   --CALL fglcm_ext.init() --forces fglcm_ext being loaded
   --CALL ui.Form.setDefaultInitializer("fglcm_ext_form_init")
@@ -14,19 +15,21 @@ FUNCTION main2()
     CALL fglcm.deleteLog()
     EXIT PROGRAM 1
   END IF
-  CALL edit_source()
+  CALL fglcm.openMainWindow()
+  CALL fglcm_ext.initMainWindow()
+  IF enter_main_loop THEN
+    CALL edit_source()
+  END IF
 END FUNCTION
 
 --main INPUT of the editor, everything is called from here
 PRIVATE FUNCTION edit_source()
-  CALL fglcm.openMainWindow()
-  CALL fglcm_ext.initMainWindow()
   OPTIONS INPUT WRAP
   --the actions using fsync() are triggered by TopMenu/Genero Shortcuts
   --the actions using sync() are triggered from the code mirror webcomponent
   INPUT fglcm.m_cm WITHOUT DEFAULTS FROM cm ATTRIBUTE(accept=FALSE,cancel=FALSE)
     BEFORE INPUT
-      CALL fglcm.before_input(DIALOG)
+      CALL fglcm.before_input(DIALOG,TRUE)
 
     ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
       CALL fglcm.setInitSeen()
@@ -42,10 +45,10 @@ PRIVATE FUNCTION edit_source()
 
     ON ACTION close_cm ATTRIBUTE(DEFAULTVIEW=NO)
       CALL fglcm.sync()
-      CALL fglcm.doClose()
+      CALL fglcm.doClose(TRUE)
     ON ACTION close
       CALL fglcm.fcsync()
-      CALL fglcm.doClose()
+      CALL fglcm.doClose(TRUE)
 
     ON ACTION complete --triggered by WC
       CALL fglcm.sync() 

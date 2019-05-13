@@ -327,6 +327,26 @@ function qaGetHintsVisible()
   return 0;
 }
 
+function qaSendInput(txt,timeout)
+{
+  if (timeout===undefined) {
+    timeout=500;
+  }
+  setTimeout(function() {
+    m_editor.setValue(txt);
+  },timeout);  
+}
+
+function qaSendAction(actionName,timeout)
+{
+  if (timeout===undefined) {
+    timeout=500;
+  }
+  setTimeout(function() {
+    gICAPI.Action(actionName);
+  },timeout);
+}
+
 function renumberLines() {
   for(var i=m_lines.length-1;i>=0;i--) {
     var line=m_lines[i];
