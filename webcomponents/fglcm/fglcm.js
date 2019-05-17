@@ -40,6 +40,8 @@ var m_repairCount = 0;
 //can be set via FGLCM_FLUSHTIMEOUT
 var m_flushTimeout = 1000;
 var m_lastChanges=null;
+var m_InAction=false;
+//var m_lastData="";
 
 function initCRCTable(){
   var c;
@@ -343,7 +345,7 @@ function qaSendAction(actionName,timeout)
     timeout=500;
   }
   setTimeout(function() {
-    gICAPI.Action(actionName);
+    myAction(actionName);
   },timeout);
 }
 
@@ -488,13 +490,25 @@ function checkUpdate(what) {
   }
 }
 
-function checkUpdateOnData() {
+function checkUpdateOnData(o) {
+  if (o.feedAction!=null) {
+    console.log("feed action:"+o.feedAction);
+    m_updateOnData=o.feedAction;
+  }
   if (m_updateOnData===null) {
     return;
   }
   var what=m_updateOnData;
   m_updateOnData=null;
   checkUpdate(what);
+}
+
+function myAction(a) {
+  console.log("before gICAPI.Action:"+a);
+  m_InAction=true;
+  gICAPI.Action(a);
+  m_InAction=false;
+  console.log("after gICAPI.Action:"+a);
 }
 
 function sendChange(cm,action,fromTimer) {
@@ -513,7 +527,8 @@ function sendChange(cm,action,fromTimer) {
   var data=sync();
   console.log("sendChange:"+data+",with action:"+action);
   gICAPI.SetData(data);
-  gICAPI.Action(action);
+  //m_lastData=data;
+  myAction(action);
   console.log("sendChange: finished");
 }
 
@@ -557,6 +572,30 @@ function myComplete(cm,cleverTab)
   }
 }
 
+function findWordUnderCursor(cm) {
+   var c=cm.getCursor();
+   var word=cm.findWordAt(c);
+   var doc=cm.getDoc();
+   var txt=doc.getRange(word.anchor,word.head)
+   doc.extendSelection(word.anchor, word.head);
+   //var txt=doc.getSelection();
+   console.log("txt:"+txt);
+   // /\b(word)\b/g word boundary
+   /*
+   var cursor=cm.getSearchCursor(txt, c, {caseFold: false});
+   //CodeMirror.commands.findPersistent(cm);
+   if (!cursor.findNext()) {
+      alert("did not find:"+txt);
+      return;
+   }
+   cm.setSelection(cursor.from(), cursor.to());
+   cm.scrollIntoView({from: cursor.from(), to: cursor.to()}, 20);
+   */
+   CodeMirror.commands.findNext(cm);
+   //doc.getRange(word.anchor,word.head)
+
+}
+
 function createEditor(ext) {
    var ed=null;
    if (m_editor) {
@@ -576,23 +615,27 @@ function createEditor(ext) {
    //via the TopMenu accelerators
    var extraKeys={
           "Alt-N":function(cm) {
-            sendChange(cm,"new_cm",false);
+            sendChange(cm,"new",false);
             return false;
           },
           "Alt-O":function(cm) {
-            sendChange(cm,"open_cm",false);
+            sendChange(cm,"open",false);
             return false;
           },
           "Alt-S":function(cm) {
-            sendChange(cm,"save_cm",false);
+            sendChange(cm,"save",false);
             return false;
           },
           "Alt-Q":function(cm) {
-            sendChange(cm,"close_cm",false);
+            sendChange(cm,"close",false);
             return false;
           },
           "Alt-L":function(cm) {
-            sendChange(cm,"gotoline_cm",false);
+            sendChange(cm,"gotoline",false);
+            return false;
+          },
+          "Alt-T":function(cm) {
+            sendChange(cm,"format_src",false);
             return false;
           },
           "Alt-F":function(cm) {
@@ -605,6 +648,10 @@ function createEditor(ext) {
           },
           "Alt-Cmd-F":function(cm) {
             CodeMirror.commands.replace(cm);
+            return false;
+          },
+          "Alt-W": function(cm) {
+            findWordUnderCursor(cm);
             return false;
           }
    };
@@ -753,6 +800,13 @@ function clearUpdateTimer() {
   }
 }
 
+function setEditorEnabled(enabled) {
+  if (m_editor===null) { return; }
+  m_editor.setOption("readOnly", enabled ? false : "nocursor");
+  const classList = m_editor.getWrapperElement().classList;
+  classList[enabled ? "remove" : "add"]("disabled");
+}
+
 onICHostReady = function(version) {
    //console.log("onICHostReady");
    gICAPI.onFocus = function(setFocus) {
@@ -828,12 +882,36 @@ onICHostReady = function(version) {
      if (m_updateOnData===null && m_fglcm_init===false) {
        //initial roundtrip
        m_fglcm_init=true;
-       gICAPI.Action("fglcm_init");
+       myAction("fglcm_init");
      } else {
-       checkUpdateOnData();
+       checkUpdateOnData(o);
      }
      //m_editor.focus();
    }
+
+   gICAPI.onFlushData = function() {
+     clearUpdateTimer();
+     if (m_updateOnData!==null) {
+       console.log("onFlushData: m_updateOnData was:"+m_updateOnData);
+       m_updateOnData=null;
+     }
+     console.log("onFlushData:m_InAction:"+m_InAction+",m_dataPending:"+m_dataPending);
+     if (m_InAction || m_dataPending) {
+       //we do not re send
+       return;
+     }
+     var data=sync();
+     gICAPI.SetData(data);
+     console.log("onFlushData new data:"+data);
+     //m_lastData=data;
+   }
+
+   gICAPI.onStateChanged=function(stateStr) {
+    var stateObj = JSON.parse(stateStr);
+    //var dialogType = stateObj.dialogType;
+    var active = stateObj.active;
+    setEditorEnabled(active);
+  }
 
    gICAPI.onProperty = function(p) {
      //var o = eval('(' + p + ')');

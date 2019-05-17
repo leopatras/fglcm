@@ -4,3 +4,10 @@
 .cm-s-eclipse span.cm-bracket { color: #808000; }
 */
 .cm-s-eclipse span.cm-bracket { color: #556b2f; }
+*.CodeMirror .readOnly {
+  background-color: #cccccc;
+}
+
+*.CodeMirror.disabled {
+  opacity: 0.3;
+}

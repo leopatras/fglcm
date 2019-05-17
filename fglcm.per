@@ -10,6 +10,7 @@ ACTION DEFAULTS
   ACTION open_from_picklist ( Text="&Pick from recently used files...", COMMENT="Opens from the recent files", ACCELERATOR=ALT-P,ACCELERATOR2=CONTROL-P,DEFAULTVIEW=NO)
   ACTION save ( Text="&Save", COMMENT="Saves the current file", ACCELERATOR=ALT-S,ACCELERATOR2=CONTROL-S,DEFAULTVIEW=NO)
   ACTION compile (TEXT="Compile", COMMENT="Compiles the module and jumps to the first issue" ,ACCELERATOR=F4,ACCELERATOR2=ALT-C)
+  ACTION format_src(TEXT="Format source", COMMENT="Formats the current file using .fgl-format options",ACCELERATOR=F5,ACCELERATOR2=ALT-T)
   --ACTION run (TEXT="Run Program", COMMENT="Runs the main module" ,ACCELERATOR=F5,ACCELERATOR2=CONTROL-R,IMAGE="fa-play")
   --ACTION jump_to_def( TEXT="Jump to Definition")
   ACTION find ( TEXT="Search..." ,COMMENT ="Opens a dialog to search text",ACCELERATOR=ALT-F,ACCELERATOR2=CONTROL-F,IMAGE="find" )
@@ -45,6 +46,7 @@ TOPMENU
   --  SEPARATOR
     COMMAND compile
     COMMAND gotoline
+    COMMAND format_src
   --  COMMAND jump_to_def 
   --  SEPARATOR
   --  COMMAND editcopy

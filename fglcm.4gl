@@ -10,7 +10,7 @@ IMPORT FGL fglped_fileutils
 --the webcomponents value->used in the main INPUT
 PUBLIC DEFINE m_cm STRING
 --how many extension actions are there
-PUBLIC CONSTANT numExtensionActions=5
+PUBLIC CONSTANT numExtensionActions=10
 PUBLIC CONSTANT S_CANCEL="*cancel*"
 
 CONSTANT S_ERROR="Error"
@@ -38,6 +38,7 @@ DEFINE m_locationhref STRING
 DEFINE m_extURL STRING --external form viewer URL
 DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
+DEFINE m_formatSource BOOLEAN
 DEFINE m_InitSeen BOOLEAN
 --CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 TYPE RecentsEntry RECORD
@@ -51,15 +52,18 @@ TYPE RecentsEntry RECORD
       ch INT
   END RECORD
 END RECORD
+
+TYPE ModelArray DYNAMIC ARRAY OF RECORD
+    line STRING,
+    orgnum INT
+END RECORD
+
 DEFINE m_recents DYNAMIC ARRAY OF RecentsEntry
 DEFINE m_lastEditorInstruction STRING
 
 DEFINE m_savedlines DYNAMIC ARRAY OF STRING
 
-DEFINE m_orglines DYNAMIC ARRAY OF RECORD
-    line STRING,
-    orgnum INT
-END RECORD
+DEFINE m_orglines ModelArray
 
 TYPE CmType RECORD
     modified DYNAMIC ARRAY OF RECORD
@@ -94,6 +98,7 @@ TYPE CmType RECORD
     cmdIdx INT, --force reload
     extension STRING, --extension of or source file
     cmCommand STRING, --editor command to perform in CodeMirror
+    feedAction STRING, --action to be tunneled thru and feed to ourselves in a round trip
     fileName STRING, --the server side file name
     locationhref STRING, --the server side location
     annotations DYNAMIC ARRAY OF RECORD --pass errors and warnings
@@ -185,7 +190,39 @@ FUNCTION my_arg_val(index)
   RETURN NULL
 END FUNCTION
 
+FUNCTION parseVersion(version)
+  DEFINE version STRING
+  DEFINE fversion,testversion FLOAT
+  DEFINE pointpos,major,idx INTEGER
+  --cut out major.minor from the version
+  LET pointpos=version.getIndexOf(".",1)
+  _ASSERT(pointpos<>0 AND pointpos<>1)
+  LET major=version.subString(1,pointpos-1)
+  _ASSERT(major IS NOT NULL AND major<100)
+  --go a long as possible thru the string after '.' and remember the last
+  --valid conversion, so it doesn't matter if a '.' or something else is right hand side of major.minor
+  LET idx=1
+  LET fversion=NULL
+  WHILE (testversion:=version.subString(1,pointpos+idx)) IS NOT NULL 
+      AND pointpos+idx <= version.getLength() 
+    LET fversion=testversion
+    --DISPLAY "fversion:",fversion," out of:",version.subString(1,pointpos+idx) 
+    LET idx=idx+1
+  END WHILE
+  _ASSERT (fversion IS NOT NULL AND fversion>0.0)
+  RETURN fversion
+END FUNCTION
+
 FUNCTION init()
+  DEFINE cli,ver STRING
+  DEFINE fver FLOAT
+  LET cli=ui.Interface.getFrontEndName() 
+  LET ver=ui.Interface.getFrontEndVersion()
+  LET fver=parseVersion(ver)
+  DISPLAY "cli:",cli,",fver:",fver
+  IF cli=="GDC" AND fver<3.1 THEN
+    CALL err(sfmt("You need a GDC version>=3.10 to run fglcm, you have GDC version:%1",ver))
+  END IF
   LET m_IsFiddle=fgl_getenv("FGLFIDDLE") IS NOT NULL
   CALL ui.Interface.loadStyles("fglcm")
   --CALL initCRC32Table()
@@ -462,12 +499,13 @@ FUNCTION doFileNew()
 END FUNCTION
 
 FUNCTION doComplete()
+  DEFINE dummy STRING
   IF NOT my_write(m_tmpname,TRUE) THEN
     EXIT PROGRAM 1
   END IF
   CALL initialize_when(TRUE)
   LET m_cmRec.proparr=complete()
-  CALL compile_and_process(FALSE) RETURNING status
+  CALL compile_and_process(FALSE) RETURNING dummy
   CALL flush_cm()
 END FUNCTION
 
@@ -477,6 +515,20 @@ FUNCTION doCompile(jump_to_error)
   CALL compileTmp(jump_to_error)
   CALL flush_cm()
 END FUNCTION
+
+FUNCTION formatSource()
+  LET m_formatSource=TRUE
+  CALL initialize_when(TRUE)
+  CALL compileTmp(TRUE)
+  LET m_formatSource=FALSE
+  IF m_cmRec.annotations.getLength()==0 THEN
+    --formatting successful
+    CALL display_full(FALSE,FALSE)
+    CALL jump_to_line(m_cline,m_ccol,m_cline,m_ccol,FALSE,FALSE)
+  END IF
+  CALL flush_cm()
+END FUNCTION
+
 
 FUNCTION doFind()
   CALL initialize_when(TRUE)
@@ -650,7 +702,7 @@ PRIVATE FUNCTION compileTmp(jump_to_error)
   IF is4GLOrPerFile(m_tmpname) THEN
     LET compmess = saveAndCompile(jump_to_error)
     IF compmess IS NULL THEN
-      CALL mymessage("Compile ok")
+      CALL mymessage(IIF(m_formatSource,"Formatting ok","Compile ok"))
       IF isGBC() AND isPERFile(m_tmpname) AND getSessionId() IS NOT NULL THEN
         CALL livePreview(m_tmpname)
       END IF
@@ -1081,6 +1133,21 @@ PRIVATE FUNCTION flush_cm()
   --CALL fgl_dialog_setbuffer(m_cm)
   DISPLAY m_cm TO cm
 END FUNCTION
+#+
+FUNCTION feedAction(actionName)
+  DEFINE actionName STRING
+  CALL initialize_when(TRUE)
+  LET m_cmRec.feedAction=actionName
+  CALL flush_cm()
+END FUNCTION
+
+FUNCTION actionPending()
+  IF m_cmRec.feedAction IS NOT NULL THEN
+    DISPLAY "actionPending:",m_cmRec.feedAction
+    RETURN TRUE
+  END IF
+  RETURN FALSE
+END FUNCTION
 
 FUNCTION doGotoLine()
   DEFINE lineno INT
@@ -1214,7 +1281,7 @@ PRIVATE FUNCTION compile_source(fname,proposals)
   DEFINE fname STRING
   DEFINE proposals INT
   DEFINE dirname,cmd,cmd1,mess,cparam,line,srcname,compOrForm,tmpName STRING
-  DEFINE result STRING
+  DEFINE result,tmpName2 STRING
   DEFINE code,i,dummy INT
   DEFINE isPER BOOLEAN
   LET dirname=mydir(fname)
@@ -1225,13 +1292,14 @@ PRIVATE FUNCTION compile_source(fname,proposals)
   IF proposals THEN
     LET cparam="-L"
   END IF
-  IF isPER OR proposals THEN
-    LET cparam=sfmt("%1 %2,%3",cparam,m_cline,m_ccol)
-  ELSE
-    IF NOT isPER AND m_IsFiddle THEN
+  CASE
+    WHEN  isPER OR proposals
+      LET cparam=sfmt("%1 %2,%3",cparam,m_cline,m_ccol)
+    WHEN NOT isPER AND m_IsFiddle
       LET cparam="-r"
-    END IF
-  END IF
+    WHEN NOT isPER AND m_formatSource
+      LET cparam="--format"
+  END CASE
   LET compOrForm=IIF(isPER,"fglform","fglcomp")
   LET cmd=buildCompileCmd(dirname,compOrForm,cparam,fname)
   CALL compile_arr.clear()
@@ -1242,6 +1310,10 @@ PRIVATE FUNCTION compile_source(fname,proposals)
   IF NOT proposals THEN
     LET tmpName=os.Path.makeTempName()
     LET cmd1=cmd,tmpName
+    IF m_formatSource THEN 
+      LET tmpName2=os.Path.makeTempName()
+      LET cmd1=cmd1," >",tmpName2
+    END IF
     RUN cmd1 RETURNING code 
     IF isPER THEN
       CALL setPreviewActionActive(code==0)
@@ -1273,10 +1345,20 @@ PRIVATE FUNCTION compile_source(fname,proposals)
       LET mess=mess,compile_arr[i],"\n"
     END FOR
     LET result=mess
+  ELSE
+    IF m_formatSource THEN
+      IF NOT file_read(tmpName2) THEN
+        CALL err("Can't read formatted source")
+      END IF
+    END IF
   END IF
   IF tmpName IS NOT NULL THEN
     DISPLAY "delete tmpName:",tmpName
     CALL os.Path.delete(tmpName) RETURNING dummy
+  END IF
+  IF tmpName2 IS NOT NULL THEN
+    DISPLAY "delete tmpName2:",tmpName
+    CALL os.Path.delete(tmpName2) RETURNING dummy
   END IF
   RETURN result
 END FUNCTION
@@ -1487,12 +1569,24 @@ PRIVATE FUNCTION process_compile_errors(fname,jump_to_error)
   END WHILE
 END FUNCTION
 
+FUNCTION copyModel(src,dest)
+  DEFINE src,dest ModelArray
+  DEFINE i,len INT
+  CALL dest.clear()
+  LET len=src.getLength()
+  FOR i=1 TO len
+    LET dest[i].* = src[i].*
+  END FOR
+END FUNCTION
+
 PRIVATE FUNCTION file_read(srcfile)
   DEFINE srcfile STRING
   DEFINE ch base.Channel
   DEFINE line STRING
   DEFINE linenum INT
+  DEFINE backup ModelArray
   LET  ch=base.channel.create()
+  CALL copyModel(m_orglines,backup)
   CALL m_orglines.clear()
   TRY
   CALL ch.openFile(srcfile,"r")
@@ -1515,6 +1609,7 @@ PRIVATE FUNCTION file_read(srcfile)
   --DISPLAY "m_orglines:",util.JSON.stringify(m_orglines),",len:",m_orglines.getLength()
   CATCH
     DISPLAY err_get(status)
+    CALL copyModel(backup,m_orglines)
     RETURN FALSE
   END TRY
   RETURN TRUE
@@ -2352,6 +2447,16 @@ FUNCTION to_stderr(s)
    CALL c.writeLine(s)
 END FUNCTION
 
+FUNCTION readFileIntoString(fileName)
+  DEFINE fileName STRING
+  DEFINE content STRING
+  DEFINE t TEXT
+  _ASSERT( os.Path.exists(filename) )
+  LOCATE t IN FILE filename
+  LET content=t
+  RETURN content
+END FUNCTION
+
 FUNCTION setQAChooseFileName(fname)
   DEFINE fname STRING
   LET m_qa_chooseFileName=fname
@@ -2364,13 +2469,13 @@ END FUNCTION
 
 FUNCTION qaReadFile(filename)
   DEFINE filename STRING
-  DEFINE content STRING
-  DEFINE t TEXT
-  _ASSERT( os.Path.exists(filename) )
-  LOCATE t IN FILE filename
-  LET content=t
-  RETURN content
+  RETURN readFileIntoString(filename)
 END FUNCTION
+
+FUNCTION qaGetInternalBufferJSON()
+  RETURN util.JSON.stringify(m_orglines)
+END FUNCTION
+
 
 FUNCTION qaSendAction(actionName)
   DEFINE actionName STRING

@@ -35,6 +35,7 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.setInitSeen()
 
     ON ACTION run
+      CALL fglcm.sync() 
       CALL fglcm.runprog()
 
     ON ACTION preview
@@ -43,11 +44,8 @@ PRIVATE FUNCTION edit_source()
     ON ACTION showpreviewurl
       CALL fglcm.show_previewurl()
 
-    ON ACTION close_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL fglcm.sync()
-      CALL fglcm.doClose(TRUE)
     ON ACTION close
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doClose(TRUE)
 
     ON ACTION complete --triggered by WC
@@ -55,83 +53,92 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.doComplete()
 
     ON ACTION find
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doFind()
       
     ON ACTION replace
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doReplace()
 
-    ON ACTION gotoline_cm --triggered by WC
+    ON ACTION gotoline
       CALL fglcm.sync()
-      CALL fglcm.doGotoLine()
-    ON ACTION gotoline --triggered by TopMenu
-      CALL fglcm.fcsync()
       CALL fglcm.doGotoLine()
 
     ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
       CALL fglcm.sync()
-      CALL fglcm.doCompile(FALSE)
+      IF NOT fglcm.actionPending() THEN
+        CALL fglcm.doCompile(FALSE)
+      END IF
 
     ON ACTION compile ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doCompile(TRUE) --jumps to the first error
 
-    ON ACTION new_cm ATTRIBUTE(DEFAULTVIEW=NO)
+    ON ACTION new --triggered by TopMenu
       CALL fglcm.sync()
-      CALL fglcm.doFileNew()
-    ON ACTION new
-      CALL fglcm.fcsync()
       CALL fglcm.doFileNew()
       
-    ON ACTION open_cm ATTRIBUTE(DEFAULTVIEW=NO)
+    ON ACTION open --triggered by TopMenu
       CALL fglcm.sync()
-      CALL fglcm.doFileOpen(NULL)
-    ON ACTION open
-      CALL fglcm.fcsync()
       CALL fglcm.doFileOpen(NULL)
 
     ON ACTION open_from_picklist
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.openFromPickList()
 
-    ON ACTION save_cm ATTRIBUTE(DEFAULTVIEW=NO)
-      CALL fglcm.sync()
-      CALL fglcm.doFileSave()
     ON ACTION save
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doFileSave()
 
     ON ACTION saveas
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doFileSaveAs()
 
+    ON ACTION format_src
+      CALL fglcm.sync()
+      CALL fglcm.formatSource()
+
     ON ACTION fglcm_ext1
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm_ext.extensionAction("fglcm_ext1")
     ON ACTION fglcm_ext2
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm_ext.extensionAction("fglcm_ext2")
     ON ACTION fglcm_ext3
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm_ext.extensionAction("fglcm_ext3")
     ON ACTION fglcm_ext4
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm_ext.extensionAction("fglcm_ext4")
     ON ACTION fglcm_ext5
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm_ext.extensionAction("fglcm_ext5")
+    ON ACTION fglcm_ext6
+      CALL fglcm.sync()
+      CALL fglcm_ext.extensionAction("fglcm_ext6")
+    ON ACTION fglcm_ext7
+      CALL fglcm.sync()
+      CALL fglcm_ext.extensionAction("fglcm_ext7")
+    ON ACTION fglcm_ext8
+      CALL fglcm.sync()
+      CALL fglcm_ext.extensionAction("fglcm_ext8")
+    ON ACTION fglcm_ext9
+      CALL fglcm.sync()
+      CALL fglcm_ext.extensionAction("fglcm_ext9")
+    ON ACTION fglcm_ext10
+      CALL fglcm.sync()
+      CALL fglcm_ext.extensionAction("fglcm_ext10")
 
     ON ACTION main4gl
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doFileOpen("main.4gl")
 
     ON ACTION mainper
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.doFileOpen("main.per")
 
     ON ACTION browse_demos
-      CALL fglcm.fcsync()
+      CALL fglcm.sync()
       CALL fglcm.browse_demos()
 
   END INPUT

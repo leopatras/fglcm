@@ -112,7 +112,6 @@ FUNCTION file_get_output_string(cmd)
   DEFINE cmd STRING
   DEFINE arr DYNAMIC ARRAY OF STRING
   DEFINE i,len INT
-  DEFINE result STRING
   DEFINE buf base.StringBuffer
   LET buf=base.StringBuffer.create()
   CALL file_get_output(cmd,arr)
