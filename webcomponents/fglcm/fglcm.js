@@ -1,17 +1,125 @@
 //short debugging helper in absence of gICAPI
-m_syncLocal=false;
+var m_syncLocal=false;
+var m_syncNum=0;
+var m_logStr="";
+function mylog(s) {
+  m_logStr=(m_logStr=="")?s:(m_logStr+"\n"+s);
+  console.log(s);
+}
+
 try {
   gICAPI;
 } catch (e) {
   //m_syncLocal=true;
   gICAPI={};
   gICAPI.Action=function(aName) {
-    console.log(">>gICAPI.Action('"+aName+"')");
+    mylog(">>gICAPI.Action('"+aName+"')");
   }
   gICAPI.SetData=function(value) {
-    console.log(">>gICAPI.SetData('"+value+"')");
+    mylog(">>gICAPI.SetData('"+value+"')");
   }
 }
+
+function getEvTarget(ev) {
+  if (!ev) {
+    return undefined;
+  }
+  if(ev.REPLAYTARGET) { return ev.REPLAYTARGET; }
+  return ev.target ? 
+    ((ev.target.nodeType==3)?ev.target.parentElement:ev.target)
+    : ev.srcElement;
+}
+
+function printEl(el) {
+  if (!el) { return "no el"; }
+  return el.tagName+",id:"+el.id;
+}
+
+function printFocus() {
+  return printEl(document.activeElement);
+}
+
+function getKeyVal(ev) { 
+  return String.fromCharCode(ev.keyCode); 
+}
+
+function printEv(ev,what) {
+  var target = getEvTarget(ev);
+  var tagName=target?target.tagName:"unknown";
+  var id=target?target.id:"unknown";
+  //  if ( e.type == "keydown" ) { try { e.keyCode = 0 } catch(x) {} }
+  try {
+  mylog(what+(what?" ":"")+"event target:"+tagName+",id:"+ id +
+      ",type:" + ev.type     +
+      ",keyCode:"       + ev.keyCode  +
+      ",charCode:"      + ev.charCode  +
+      ",which:"         + ev.which  +
+      ",keyVal:"        + getKeyVal(ev)  +
+      ",altKey:"        + ev.altKey   +
+      ",altKey:"        + ev.altKey   +
+      ",shiftKey:"      + ev.shiftKey +
+      ",ctrlKey:"       + ev.ctrlKey  +
+      ",metaKey:"       + ev.metaKey  +
+      ",clientX:"       + ev.clientX  +
+      ",clientY:"       + ev.clientY  +
+      ",screenX:"       + ev.screenX  +
+      ",screenY:"       + ev.screenY +
+      ",activeEl:"      + printFocus()
+      );
+   } catch(x) {
+     mylog("failure:"+x.message);
+   }
+  /*
+     for(i in ev) {
+     mylog("ev:"+i+"="+ev[i]);
+     }*/
+}
+
+function toNavigationKey(ev) {
+   var code=ev.keyCode;
+   var k="";
+   switch (code) {
+    case 8: k="BackSpace";break;
+    case 9: k=ev.shiftKey?"Shift-Tab":"Tab";break;
+    case 13: k=ev.shiftKey?"Shift-Return":"Return";break;
+    case 33:
+      k="prevpage";break;
+    case 34:
+      k="nextpage";break;
+    case 38:k="Up";break;
+    case 40:k="Down";break;
+    case 37:k="Left";break;
+    case 39:k="Right";break;
+    case 36:
+      k="Home";
+      break;
+    case 35:
+      k="End";
+      break;
+    case 46:
+      k="Delete";
+      break;
+   } 
+   return k;
+}
+
+function handleKeyDown(ev) { //global keydown handler
+  printEv(ev,"handleKeyDown");
+  var k = toNavigationKey(ev);
+  mylog("k:"+k);
+  /*
+  if (k!=="") {
+    CodeMirror.e_stop(ev);
+  }*/
+}
+
+function handleStop(ev) {
+  CodeMirror.e_stop(ev);
+}
+
+CodeMirror.on(document,"keydown",handleKeyDown);
+//CodeMirror.on(document,"keypress",handleStop);
+//CodeMirror.on(document,"keyup",handleStop);
 
 var m_instance=0;
 var m_inSetValue=false;
@@ -41,6 +149,8 @@ var m_repairCount = 0;
 var m_flushTimeout = 1000;
 var m_lastChanges=null;
 var m_InAction=false;
+var m_search_history=[];
+var m_search_idx=-1;
 //var m_lastData="";
 
 function initCRCTable(){
@@ -70,7 +180,7 @@ m_utf8encoder=null;
 try {
   m_utf8encoder=new TextEncoder("utf-8");
 } catch (err) {
-  console.log("No TextEncoder:"+err.message);
+  mylog("No TextEncoder:"+err.message);
 }
 
 function toUtf8ByteArray(str) {
@@ -166,10 +276,10 @@ function sync() {
     if (line.state==e_states.modified && line.orgnum!==undefined) {
       var orgnum=line.orgnum;
       if (m_syncLocal && (orgnum<0 || orgnum>=m_orglines.length)) {
-        console.log("!!line:"+i+",orgnum:"+orgnum+", m_orglines.length:'"+m_orglines.length+"'");
+        mylog("!!line:"+i+",orgnum:"+orgnum+", m_orglines.length:'"+m_orglines.length+"'");
       } else {
-        //console.log("add changed:"+JSON.stringify(line));
-        console.log("patch line:"+orgnum+" with '"+line.line+ "'")
+        //mylog("add changed:"+JSON.stringify(line));
+        mylog("patch line:"+orgnum+" with '"+line.line+ "'")
         if (m_syncLocal) {
           m_orglines[orgnum].line=line.line;
           line.state=e_states.initial;
@@ -196,7 +306,9 @@ function sync() {
     var len=full.length;
     var crc=crc32(full);
     var t1 = performance.now();
-    console.log("crc32 took " + (t1 - t0) + " milliseconds.")
+    mylog("crc32 took " + (t1 - t0) + " milliseconds.")
+    m_syncNum++; //first time:1
+    var syncNum=m_syncNum;
     var o={
       //full: editor.getValue(), //enable for debugging
       crc:crc,
@@ -208,7 +320,8 @@ function sync() {
       cursor1:editor.getCursor(true),
       cursor2:editor.getCursor(false),
       vm: false,
-      locationhref: window.location.href
+      locationhref: window.location.href,
+      syncNum:syncNum
     }
     renumberLines();
     m_removed=[];
@@ -229,20 +342,20 @@ function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
   }
   //inserts
   var j=0;
-  console.log("inserts:",JSON.stringify(inserts));
+  mylog("inserts:",JSON.stringify(inserts));
   for(var i=0;i<inserts.length;i++) {
     var insert=inserts[i];
     var orgnum=insert.orgnum;
     for (;j<m_orglines.length;j++) {
       var line=m_orglines[j];
-      console.log("line:"+j+",line orgnum:"+line.orgnum+",orgnum:"+orgnum);
+      mylog("line:"+j+",line orgnum:"+line.orgnum+",orgnum:"+orgnum);
       if (line.orgnum==orgnum) {
         var ilines=insert.ilines;
         for(var z=0;z<ilines.length;z++) {
           var newline=ilines[z];
           newline.orgnum=-1;
           var insertpos=j+z+1;
-          console.log("insert new line at:"+insertpos+" with line:'"+newline.line+"'");
+          mylog("insert new line at:"+insertpos+" with line:'"+newline.line+"'");
           m_orglines.splice(insertpos,0,newline);
         }
         break;
@@ -250,19 +363,19 @@ function syncLocalRemovesAndInserts(coalescedRemoves,inserts){
     }
   }
   if (m_lines.length!==m_orglines.length) {
-    console.log("m_lines.length:"+m_lines.length+",m_orglines.length:"+m_orglines.length);
+    mylog("m_lines.length:"+m_lines.length+",m_orglines.length:"+m_orglines.length);
   } else {
     var fail=false;
     for (var i=0;i<m_lines.length;i++) {
       var line=m_lines[i];
       var orgline=m_orglines[i];
       if (line.line!=orgline.line) {
-        console.log("line:"+i+" '"+line.line+"' <> org:'"+orgline.line+"'");
+        mylog("line:"+i+" '"+line.line+"' <> org:'"+orgline.line+"'");
         fail=true;
       }
     }
     if (!fail) {
-      console.log("ok!!!");
+      mylog("ok!!!");
     }
   }
 }
@@ -275,7 +388,13 @@ function getFullTextAndRepair()
   var doc=editor.getDoc();
   var cnt=doc.lineCount();
   initLines(doc);
-  return JSON.stringify({full:full,crc32: crc32(full),lastChanges:JSON.stringify(m_lastChanges),lineCount:cnt});
+  return JSON.stringify({full:full,crc32: crc32(full),lastChanges:JSON.stringify(m_lastChanges),lineCount:cnt,log:getLog()});
+}
+
+function getLog() {
+  var log=m_logStr;
+  m_logStr="";
+  return log;
 }
 
 function qaGetFullText()
@@ -322,7 +441,7 @@ function isVisible(el) {
 function qaGetHintsVisible()
 {
   var arr=document.getElementsByClassName("CodeMirror-hints");
-  console.log("arr.length:",arr.length);
+  mylog("arr.length:",arr.length);
   if (arr.length===1) {
     return isVisible(arr[0])?1:0;
   }
@@ -390,10 +509,10 @@ function fillValues(cm,o) {
   //o.full=(o.full===undefined)?null:o.full;
   o.cursor1=cm.getCursor(true);
   o.cursor2=cm.getCursor(false);
-  //console.log("fillValues o:"+JSON.stringify(o));
+  //mylog("fillValues o:"+JSON.stringify(o));
 }*/
 function onChanges(cm,oarr) {
-  console.log("onChanges, m_inSetValue:"+m_inSetValue);
+  mylog("onChanges, m_inSetValue:"+m_inSetValue);
   //the trace of the inserts is needed for the block sel ops
   //(block sel and then hit Return)
   var inserted=0;
@@ -404,8 +523,8 @@ function onChanges(cm,oarr) {
 }
 
 function onChange(cm,o,inserted) {
-  //console.log("onChange, m_inSetValue:"+m_inSetValue+",o:"+JSON.stringify(o));
-  console.log("onChange, m_inSetValue:"+m_inSetValue+",inserted:"+inserted);
+  //mylog("onChange, m_inSetValue:"+m_inSetValue+",o:"+JSON.stringify(o));
+  mylog("onChange, m_inSetValue:"+m_inSetValue+",inserted:"+inserted);
 
   if (m_inSetValue) { return;}
   var fromLine=o.from.line;
@@ -413,7 +532,7 @@ function onChange(cm,o,inserted) {
   var doc=cm.getDoc();
   var mlen=m_lines.length;
   for (var i=fromLine;i<=toLine&&i<mlen;i++) {
-    //console.log("line "+i+" changed");
+    //mylog("line "+i+" changed");
     m_lines[i].state=e_states.modified;
     m_lines[i].line=doc.getLine(i);
   }
@@ -421,7 +540,7 @@ function onChange(cm,o,inserted) {
   try {
     prepareRemoves(orgremoved,fromLine,toLine);
   } catch(err) {
-    console.log("removed catch:"+err.message);
+    mylog("removed catch:"+err.message);
   }
   var orginserts=o.text;
   var len=orginserts.length;
@@ -436,15 +555,15 @@ function onChange(cm,o,inserted) {
   }
   var cnt=doc.lineCount();
   if (m_lineCount!=cnt) {
-    console.log("linecount changed from " + m_lineCount + " to "+cnt);
+    mylog("linecount changed from " + m_lineCount + " to "+cnt);
     m_lineCount=cnt;
   }
-  //console.log("m_lines:"+JSON.stringify(m_lines));
+  //mylog("m_lines:"+JSON.stringify(m_lines));
   //fillValues(cm,o);
   //gICAPI.SetData(JSON.stringify(o));
   /*
   if (cm.state.completionActive) {
-    console.log("completion active");
+    mylog("completion active");
     clearSyncTimer(); 
     m_syncId = setTimeout(function() {
        sendChange(cm,"complete",true);
@@ -454,7 +573,7 @@ function onChange(cm,o,inserted) {
   clearUpdateTimer();
   if (fIs4GLOrPer(cm.EXTENSION)) {
     if (m_dataPending) {
-      console.log("data pending after onChange:set dolater");
+      mylog("data pending after onChange:set dolater");
       m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
     } else {
       m_updateId = setTimeout(function() { checkUpdate("update");} ,cm.state.completionActive?100:m_flushTimeout);
@@ -469,7 +588,7 @@ function prepareRemoves(orgremoved,fromLine,toLine) {
   for (var i=0;i<orgremoved.length-1;i++) {
     var idx=start+i;
     if (m_lines[idx].orgnum!==undefined) {
-      //console.log("save remove org line:",idx);
+      //mylog("save remove org line:",idx);
       m_removed.push(m_lines[idx].orgnum);
     }
   }
@@ -479,7 +598,7 @@ function prepareRemoves(orgremoved,fromLine,toLine) {
 function checkUpdate(what) {
   clearUpdateTimer();
   if (m_dataPending) {
-    console.log("datapending in update");
+    mylog("datapending in update");
     m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
     return;
   }
@@ -492,7 +611,7 @@ function checkUpdate(what) {
 
 function checkUpdateOnData(o) {
   if (o.feedAction!=null) {
-    console.log("feed action:"+o.feedAction);
+    mylog("feed action:"+o.feedAction);
     m_updateOnData=o.feedAction;
   }
   if (m_updateOnData===null) {
@@ -504,11 +623,11 @@ function checkUpdateOnData(o) {
 }
 
 function myAction(a) {
-  console.log("before gICAPI.Action:"+a);
+  mylog("before gICAPI.Action:"+a);
   m_InAction=true;
   gICAPI.Action(a);
   m_InAction=false;
-  console.log("after gICAPI.Action:"+a);
+  mylog("after gICAPI.Action:"+a);
 }
 
 function sendChange(cm,action,fromTimer) {
@@ -516,24 +635,24 @@ function sendChange(cm,action,fromTimer) {
   //onChange(cm,o);
   //alert("action:"+action);
   if (fromTimer) {
-    console.log("sendChange fromTimer");
+    mylog("sendChange fromTimer");
     clearSyncTimer();
     if (!cm.state.completionActive) {
-      console.log("no completion active");
+      mylog("no completion active");
       return;
     }
   }
   m_dataPending=true;
   var data=sync();
-  console.log("sendChange:"+data+",with action:"+action);
+  mylog("sendChange:"+data+",with action:"+action);
   gICAPI.SetData(data);
   //m_lastData=data;
   myAction(action);
-  console.log("sendChange: finished");
+  mylog("sendChange: finished");
 }
 
 function onKeyHandled(cm,name,ev) {
-  //console.log("keyHandled:"+name);
+  //mylog("keyHandled:"+name);
 }
 
 function myAnnotations(text, options) {
@@ -550,7 +669,7 @@ function lineEmptyUntilCursor(cm)
   var cursor=doc.getCursor();
   var linenum=cursor.line;
   var linepart=doc.getLine(linenum).substr(0,cursor.ch);
-  console.log("line part is "+linepart.length+ " spaces");
+  mylog("line part is "+linepart.length+ " spaces");
   return /^\s*$/.test(linepart);
 }
 
@@ -558,12 +677,12 @@ function myComplete(cm,cleverTab)
 {
   //m_state="complete";
   if (m_dataPending) {
-    console.log("Tab seen,data pending in completion");
+    mylog("Tab seen,data pending in completion");
     m_updateOnData="complete";
   } else {
-    console.log("Tab seen,sending completion");
+    mylog("Tab seen,sending completion");
     if (cleverTab && lineEmptyUntilCursor(cm)) {
-      console.log("insertSoftTab")
+      mylog("insertSoftTab")
       CodeMirror.commands.insertSoftTab(cm);
     } else {
       clearUpdateTimer();
@@ -579,7 +698,7 @@ function findWordUnderCursor(cm) {
    var txt=doc.getRange(word.anchor,word.head)
    doc.extendSelection(word.anchor, word.head);
    //var txt=doc.getSelection();
-   console.log("txt:"+txt);
+   mylog("txt:"+txt);
    // /\b(word)\b/g word boundary
    /*
    var cursor=cm.getSearchCursor(txt, c, {caseFold: false});
@@ -596,6 +715,107 @@ function findWordUnderCursor(cm) {
 
 }
 
+function insertIntoSearchHistory(val) {
+  var idx=m_search_history.indexOf(val);
+  mylog("history before insert:"+val+" "+JSON.stringify(m_search_history));
+  mylog("idx:"+idx);
+  if (idx> -1) { //remove at found index
+    m_search_history.splice(idx,1);
+  }
+  m_search_history.splice(0,0,val); //insert at first pos
+  mylog("history after insert:"+val+" "+JSON.stringify(m_search_history));
+  m_search_idx=-1;
+}
+
+function searchHistoryUp(prevEntry) {
+  var entry="";
+  if (m_search_history.length==0) {
+    return prevEntry;
+  }
+  m_search_idx=m_search_idx+1;
+  if (m_search_idx>m_search_history.length-1) {
+    m_search_idx=m_search_history.length-1;
+  }
+  if (m_search_idx>=0) {
+    entry=m_search_history[m_search_idx];
+  }
+  if (entry==prevEntry &&
+     m_search_history.length>0 && m_search_idx<m_search_history.length-1) {
+    //the value didnt change
+    return searchHistoryUp(prevEntry);
+  }
+  return entry;
+}
+
+function searchHistoryDown(prevEntry) {
+  var entry="";
+  if (m_search_history.length==0) {
+    return prevEntry;
+  }
+  m_search_idx=m_search_idx-1  
+  if (m_search_idx<-1) {
+    m_search_idx=-1;
+  } else if (m_search_idx>m_search_history.length-1) {
+    m_search_idx=m_search_history.length-1;
+  }
+  if (m_search_idx>=0) {
+    entry=m_search_history[m_search_idx];
+  }
+  return entry;
+}
+
+function handleKeyDownSearch(ev) {
+  printEv(ev,"handleKeyDownSearch");
+  var target=getEvTarget(ev);
+  var k = toNavigationKey(ev);
+  mylog("k:"+k);
+  if (k=="Return" || k=="Shift-Return") {
+    var val=target.value;
+    mylog("Search:"+val);
+    insertIntoSearchHistory(val);
+  } else if (k=="Up") {
+    target.value=searchHistoryUp(target.value);
+    CodeMirror.e_stop(ev);
+  } else if (k=="Down") {
+    target.value=searchHistoryDown(target.value);
+    CodeMirror.e_stop(ev);
+  }
+}
+
+function clearDialog() {
+  if (getDialog()) {
+    m_editor.focus(); //causes destroy of curr dlg 
+  }
+}
+
+function searchDialogActive() {
+  var dlg=getDialog();
+  return (dlg && dlg["data-searchdlg"]===true);
+}
+
+function findPersistent(cm) {
+  clearDialog();
+  CodeMirror.commands.findPersistent(cm);
+  var inp=document.activeElement;
+  if (inp && inp.tagName=="INPUT") {
+    var dlg=getDialog();
+    dlg["data-searchdlg"]=true;
+    mylog("add keydown listener:"+printEl(inp));
+    try {
+      CodeMirror.off(inp,"keydown",handleKeyDown);
+    } catch (msg) {
+      mylog("CodeMirror.off failed:"+msg.message);
+    }
+    CodeMirror.on(inp,"keydown",handleKeyDownSearch);
+    m_search_idx=-1;
+  }
+}
+
+function doReplace(cm) {
+  clearDialog();
+  CodeMirror.commands.replace(cm);
+}
+
 function createEditor(ext) {
    var ed=null;
    if (m_editor) {
@@ -605,10 +825,9 @@ function createEditor(ext) {
    }
    ed=document.createElement("TEXTAREA");
    ed.className="fglcm_editor";
-   ed.id="editor";
    m_instance++;
    m_editorId="editor"+m_instance;
-   ed.id=m_editorId;
+   ed.id=m_editorId; //doesn't work
    document.body.appendChild(ed);
    var lint=true;
    //those keys are mostly for GBC because it can't handle them
@@ -639,15 +858,15 @@ function createEditor(ext) {
             return false;
           },
           "Alt-F":function(cm) {
-            CodeMirror.commands.findPersistent(cm);
+            findPersistent(cm);
             return false;
           },
           "Cmd-F":function(cm) {
-            CodeMirror.commands.findPersistent(cm);
+            findPersistent(cm);
             return false;
           },
           "Alt-Cmd-F":function(cm) {
-            CodeMirror.commands.replace(cm);
+            doReplace(cm);
             return false;
           },
           "Alt-W": function(cm) {
@@ -724,7 +943,7 @@ function get4GLHint(cm, c) {
    /*
    var t1 = performance.now();
    var diff= t1-m_lastseen;
-   console.log("diff:"+diff);
+   mylog("diff:"+diff);
    if (diff<1000) {
      //alert("get4GLHint");
    }
@@ -732,7 +951,7 @@ function get4GLHint(cm, c) {
    */
    var cursor=cm.getCursor();
    var word = cm.findWordAt(cursor);
-   console.log("word:"+JSON.stringify(word));
+   mylog("word:"+JSON.stringify(word));
    var txt=cm.getRange(word.anchor, word.head);
    var re_noalnum=/^["'\^%\*\-\+,= \\/\.\[\](){};]+$/;
    var isAlNum=true;
@@ -740,24 +959,24 @@ function get4GLHint(cm, c) {
      if (word.anchor.ch<cursor.ch) {
        //var nextCursor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
        //txt=cm.getRange(cursor, nextCursor);
-       console.log("word is noalnum");
+       mylog("word is noalnum");
        isAlNum=false;
        word.head=cursor;
        word.anchor=cursor;
      }
    }
-   console.log("txt:'"+txt+"'");
+   mylog("txt:'"+txt+"'");
    var foundeq=false;
    if (cursor.ch>0 && isAlNum) {
      var prevCursor=new CodeMirror.Pos(cursor.line,cursor.ch-1);
      var word2=cm.findWordAt(prevCursor);
      var txt2=cm.getRange(word2.anchor, word2.head);
-     console.log("txt2:'"+txt2+"'");
+     mylog("txt2:'"+txt2+"'");
      if ((txt=="." && txt2==".")||(txt=='"' && txt2=='"')) {
        word.head=word.anchor=new CodeMirror.Pos(cursor.line,cursor.ch+1);
      } else if (re_noalnum.test(txt) /*|| isInPropArr(txt2)*/) {
        if (txt!=txt2) {
-         console.log("switch to word2:"+txt2);
+         mylog("switch to word2:"+txt2);
          word=word2;
          txt=txt2;
        } else {
@@ -807,22 +1026,31 @@ function setEditorEnabled(enabled) {
   classList[enabled ? "remove" : "add"]("disabled");
 }
 
+function getDialog() {
+  if (!m_editor) {
+    return false;
+  }
+  return m_editor.getWrapperElement().querySelector(".CodeMirror-dialog");
+}
+
 onICHostReady = function(version) {
-   //console.log("onICHostReady");
+   //mylog("onICHostReady");
    gICAPI.onFocus = function(setFocus) {
+     mylog("onFocus:"+setFocus);
      if (setFocus&&m_editor) {
+       mylog("editor setFocus");
        m_editor.focus();
      }
    }
    gICAPI.onData = function(data) {
      //alert("onData:"+data);
-     console.log("onData:"+data+",m_updateOnData:"+m_updateOnData);
+     mylog("onData:"+data+",m_updateOnData:"+m_updateOnData);
      if (data===undefined || data===null) {
        alert("onData with undefined or null, check your code!!!");
        return;
      }
      var o=JSON.parse(data);
-     //console.log("onData m_state:"+m_state+",data:"+data);
+     //mylog("onData m_state:"+m_state+",data:"+data);
      if (!o.vm) { //change was not issued by 4GL side ..GBC problem???
        //checkUpdateOnData();
        return;
@@ -833,12 +1061,12 @@ onICHostReady = function(version) {
      m_dataPending=false; 
      if (o.extension!==undefined) {
        if (m_editor.EXTENSION!=o.extension) {
-         console.log("extension changed from:"+m_editor.EXTENSION+" to:",o.extension);
+         mylog("extension changed from:"+m_editor.EXTENSION+" to:",o.extension);
          createEditor(o.extension);
        }
      }
      if (o.proparr!==undefined) {
-       console.log("prepareCompletion");
+       mylog("prepareCompletion");
        //alert("complete arr:"+data);
        m_proparr=o.proparr; //we preserve the completion list
        clearCompletionAliveTimer();
@@ -851,7 +1079,7 @@ onICHostReady = function(version) {
      if (o.full!==undefined) {
        if ((o.fileName!==undefined && o.fileName!=m_editor.FILENAME) ||
             o.cmCommand=="reload" ) {
-         console.log("would swap doc");
+         mylog("would swap doc");
          var doc=new CodeMirror.Doc(o.full,m_editor.getMode());
          m_editor.swapDoc(doc);
          m_editor.FILENAME=o.fileName;
@@ -861,7 +1089,7 @@ onICHostReady = function(version) {
        }
      }
      if (o.cursor1!==undefined) {
-       console.log("set cursor");
+       mylog("set cursor");
        if (o.cursor2===undefined) {
          o.cursor2=o.cursor1;
        }
@@ -875,9 +1103,9 @@ onICHostReady = function(version) {
        m_editor.performLint();
      }
      if (o.cmCommand=="find") {
-       CodeMirror.commands.findPersistent(m_editor);
+       findPersistent(m_editor);
      } else if (o.cmCommand=="replace") {
-       CodeMirror.commands.replace(m_editor);
+       doReplace(m_editor);
      }
      if (m_updateOnData===null && m_fglcm_init===false) {
        //initial roundtrip
@@ -888,35 +1116,33 @@ onICHostReady = function(version) {
      }
      //m_editor.focus();
    }
-
+   /*
    gICAPI.onFlushData = function() {
      clearUpdateTimer();
      if (m_updateOnData!==null) {
-       console.log("onFlushData: m_updateOnData was:"+m_updateOnData);
+       mylog("onFlushData: m_updateOnData was:"+m_updateOnData);
        m_updateOnData=null;
      }
-     console.log("onFlushData:m_InAction:"+m_InAction+",m_dataPending:"+m_dataPending);
+     mylog("onFlushData:m_InAction:"+m_InAction+",m_dataPending:"+m_dataPending);
      if (m_InAction || m_dataPending) {
        //we do not re send
        return;
      }
      var data=sync();
      gICAPI.SetData(data);
-     console.log("onFlushData new data:"+data);
+     mylog("onFlushData new data:"+data);
      //m_lastData=data;
-   }
+  }*/
 
-   gICAPI.onStateChanged=function(stateStr) {
+  gICAPI.onStateChanged=function(stateStr) {
     var stateObj = JSON.parse(stateStr);
     //var dialogType = stateObj.dialogType;
     var active = stateObj.active;
     setEditorEnabled(active);
   }
 
-   gICAPI.onProperty = function(p) {
-     //var o = eval('(' + p + ')');
-     //console.log(JSON.stringify(o));
-   }
+  gICAPI.onProperty = function(p) { //do nothing
+  }
 }
 /*
 function tryMarkers() {
@@ -927,7 +1153,7 @@ function tryMarkers() {
 setInterval(function(){ 
   var e=document.activeElement;
   if (e) {
-    console.log("focus:"+e.tagName+",id:"+e.id+",className:"+e.className);
+    mylog("focus:"+e.tagName+",id:"+e.id+",className:"+e.className);
   }
 }, 1000);
 */

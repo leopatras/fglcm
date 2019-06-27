@@ -24,6 +24,7 @@ END FUNCTION
 
 --main INPUT of the editor, everything is called from here
 PRIVATE FUNCTION edit_source()
+  DEFINE log STRING
   OPTIONS INPUT WRAP
   --the actions using fsync() are triggered by TopMenu/Genero Shortcuts
   --the actions using sync() are triggered from the code mirror webcomponent
@@ -48,7 +49,12 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.doClose(TRUE)
 
+    --ON KEY(TAB)
+    --  DISPLAY "!!!TAB!!!"
+    --  CALL fglcm.sync() 
+    --  CALL fglcm.doComplete()
     ON ACTION complete --triggered by WC
+      DISPLAY "!!!Complete!!!"
       CALL fglcm.sync() 
       CALL fglcm.doComplete()
 
@@ -97,6 +103,14 @@ PRIVATE FUNCTION edit_source()
     ON ACTION format_src
       CALL fglcm.sync()
       CALL fglcm.formatSource()
+
+    ON ACTION urready
+      DISPLAY "urready"
+      CALL fglcm.sync()
+      CALL fglcm.initGBC()
+
+    ON ACTION getlog
+      CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getLog"],[log])
 
     ON ACTION fglcm_ext1
       CALL fglcm.sync()

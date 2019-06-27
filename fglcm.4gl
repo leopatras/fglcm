@@ -5,6 +5,7 @@ IMPORT FGL fgldialog
 --IMPORT FGL fglcm_core
 IMPORT FGL fglped_md_filedlg
 IMPORT FGL fglped_fileutils
+IMPORT FGL fglwebrun
 &define _ASSERT(x) IF NOT NVL(x,0) THEN CALL assert(#x) END IF
 &define _ASSERT_MSG(x,msg) IF NOT NVL(x,0) THEN CALL assert_with_msg(#x,msg) END IF
 --the webcomponents value->used in the main INPUT
@@ -18,6 +19,10 @@ CONSTANT S_ERROR="Error"
 CONSTANT IMG_ERROR="stop"
 
 TYPE proparr_t DYNAMIC ARRAY OF STRING
+--DEFINE m_om STRING
+DEFINE m_omCount INT
+DEFINE m_lastWindowId INT
+DEFINE m_gbcInitSeen BOOLEAN
 DEFINE m_error_line STRING
 DEFINE m_cline,m_ccol INT
 DEFINE m_srcfile STRING
@@ -26,6 +31,7 @@ DEFINE m_title,m_full_title STRING
 DEFINE compile_arr DYNAMIC ARRAY OF STRING
 DEFINE m_CRCProg STRING
 DEFINE m_lastCRC BIGINT
+DEFINE m_lastSyncNum BIGINT
 DEFINE m_modified BOOLEAN
 DEFINE m_IsNewFile BOOLEAN
 DEFINE m_mainFormOpen BOOLEAN
@@ -85,6 +91,7 @@ TYPE CmType RECORD
     crc BIGINT,
     len INT,
     lineCount INT,
+    syncNum INT,
     cursor1 RECORD
       line INT,
       ch INT
@@ -352,9 +359,9 @@ END FUNCTION
 FUNCTION hideOrShowPreview()
   DEFINE f ui.Form
   DEFINE isPER, wasHidden,dummy BOOLEAN
-  IF NOT isGBC() THEN
-    RETURN
-  END IF
+  --IF NOT isGBC() THEN
+  --  RETURN
+  --END IF
   LET f=getCurrentForm()
   LET isPER=(m_IsNewFile AND ((m_NewFileExt IS NOT NULL) AND (m_NewFileExt=="per"))) OR isPERFile(m_srcfile)
   DISPLAY sfmt("hideOrShow m_srcfile:%1,isPERFile:%2,isPER:%3,hidden:%4",
@@ -362,10 +369,12 @@ FUNCTION hideOrShowPreview()
   LET wasHidden=m_previewHidden
   LET m_previewHidden=NOT isPER
   CALL f.setFieldHidden("formonly.webpreview",m_previewHidden)
+  {
   IF NOT wasHidden AND m_previewHidden THEN
     CALL os.Path.delete(getSession42f()) RETURNING dummy
-    DISPLAY NULL TO webpreview
+    --DISPLAY NULL TO webpreview
   END IF  
+  }
 END FUNCTION
 
 FUNCTION openMainWindow()
@@ -703,7 +712,7 @@ PRIVATE FUNCTION compileTmp(jump_to_error)
     LET compmess = saveAndCompile(jump_to_error)
     IF compmess IS NULL THEN
       CALL mymessage(IIF(m_formatSource,"Formatting ok","Compile ok"))
-      IF isGBC() AND isPERFile(m_tmpname) AND getSessionId() IS NOT NULL THEN
+      IF isPERFile(m_tmpname) THEN
         CALL livePreview(m_tmpname)
       END IF
     END IF
@@ -758,11 +767,15 @@ END FUNCTION
 FUNCTION writeXCF(gasappdatadir,appname)
   DEFINE gasappdatadir,appname STRING
   DEFINE xcfname,xcfcontent STRING
+  DEFINE args DYNAMIC ARRAY OF STRING
   DEFINE c base.Channel
   LET xcfname=myjoin(gasappdatadir,appname||".xcf")
   IF os.Path.exists(xcfname) THEN
     RETURN
   END IF
+  CALL fglwebrun.setupVariables()
+  CALL fglwebrun.createXCF(xcfname,"fglcm_webpreview",args,FALSE)
+  RETURN
   LET xcfcontent=sfmt(
     '<?xml version="1.0"?>\n'||
     '<APPLICATION Parent="defaultgwc" '||
@@ -788,13 +801,19 @@ END FUNCTION
 FUNCTION livePreview(tmpname)
   DEFINE tmpname STRING
   DEFINE liveurl STRING
-  CALL copyTmp2Session42f(tmpname)
-  CALL checkAppDataXCF()
-  LET liveurl=getLiveURL("fglcm_webpreview",util.Strings.urlEncode(getSessionId()))
+  IF NOT m_gbcInitSeen THEN
+    DISPLAY "livePreview:no init"
+    RETURN
+  END IF
+  CALL initGBC()
+  
+  --CALL copyTmp2Session42f(tmpname)
+  --CALL checkAppDataXCF()
+  --LET liveurl=getLiveURL("fglcm_webpreview",util.Strings.urlEncode(getSessionId()))
   #LET liveurl=myjoin(base,util.Strings.urlEncode(sfmt("_fglcm_webpreview?Arg=%1",dirname)))
   #LET liveurl=myjoin(base,sfmt("_fglcm_webpreview?Arg=%1",util.Strings.urlEncode(real42f)))
-  DISPLAY "liveurl:",liveurl
-  DISPLAY liveurl TO webpreview
+  --DISPLAY "liveurl:",liveurl
+  --DISPLAY liveurl TO webpreview
   LET m_extURL=getLiveURL("spex",util.Strings.urlEncode(getSessionId()))
 END FUNCTION
 
@@ -928,29 +947,34 @@ FUNCTION getSession42f()
   RETURN sfmt("/tmp/fglcm_%1.42f",sessionId)
 END FUNCTION
 
+FUNCTION removeWebComponentType(root)
+  DEFINE root, node om.DomNode
+  DEFINE nl om.NodeList
+  DEFINE i INT
+  DEFINE txt STRING
+  LET nl = root.selectByPath("//WebComponent")
+  FOR i=1 TO nl.getLength()
+    LET node=nl.item(i)
+    CALL node.removeAttribute("componentType")
+  END FOR
+  LET txt=root.getAttribute("text")
+  IF txt IS NULL THEN
+    CALL root.setAttribute("text","<No text>")
+  END IF
+END FUNCTION
+
 --we delete webcomponents componentType attribute if we
 --encounter webcomponents otherwise the whole GBC dies
 PRIVATE FUNCTION copyDocWithoutComponentType(src,dest)
   DEFINE src,dest STRING
   DEFINE doc om.DomDocument
-  DEFINE rootNode,node om.DomNode
-  DEFINE nl om.NodeList
-  DEFINE txt STRING
-  DEFINE i INT
+  DEFINE rootNode om.DomNode
   LET doc=om.DomDocument.createFromXmlFile(src)
   IF doc IS NULL THEN
     RETURN
   END IF
   LET rootNode=doc.getDocumentElement()
-  LET nl = rootNode.selectByPath("//WebComponent")
-  FOR i=1 TO nl.getLength()
-    LET node=nl.item(i)
-    CALL node.removeAttribute("componentType")
-  END FOR
-  LET txt=rootNode.getAttribute("text")
-  IF txt IS NULL THEN
-    CALL rootNode.setAttribute("text","<No text>")
-  END IF
+  CALL removeWebComponentType(rootNode)
   CALL rootNode.writeXml(dest)
 END FUNCTION
 
@@ -1025,19 +1049,29 @@ FUNCTION fcsync() --called if our topmenu fired an action
     CALL log("fcsync:no init seen yet")
     RETURN
   END IF
+  DISPLAY "fcsync called"
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","fcsync"],[newVal])
   CALL syncInt(newVal)
 END FUNCTION
 
 FUNCTION sync() --called if the webco fired an action
-  CALL syncInt(fgl_dialog_getbuffer())
+  DEFINE cmRec CmType
+  DEFINE buf STRING
+  LET buf=fgl_dialog_getbuffer() 
+  CALL util.JSON.parse(buf,cmRec)
+  DISPLAY sfmt("sync(): cmRec.syncNum:%1,m_lastSyncNum:%2,cmRec.vm:%3",cmRec.syncNum,m_lastSyncNum,cmRec.vm)
+  IF cmRec.vm==TRUE OR cmRec.syncNum IS NULL OR cmRec.syncNum<=m_lastSyncNum THEN
+    CALL fcsync()
+  ELSE
+    CALL syncInt(buf)
+  END IF
 END FUNCTION
 
 PRIVATE FUNCTION syncInt(newVal)
   DEFINE newVal,line STRING
   DEFINE orgnum,idx,i,j,z,len,insertpos INT
   DEFINE cmRec CmType
-  CALL log(sfmt("syncInt newVal:",newVal))
+  CALL log(sfmt("syncInt newVal:%1",newVal))
   _ASSERT(newVal IS NOT NULL)
   LET m_lastEditorInstruction=newVal
   CALL util.JSON.parse(newVal,cmRec)
@@ -1046,6 +1080,8 @@ PRIVATE FUNCTION syncInt(newVal)
   --LET src=cmRec.full
   LET m_cline=cmRec.cursor1.line+1
   LET m_ccol=cmRec.cursor1.ch+1
+  _ASSERT_MSG(cmRec.syncNum=m_lastSyncNum+1,sfmt("cmRec.syncNum:%1,m_lastSyncNum:%2",cmRec.syncNum,m_lastSyncNum))
+  LET m_lastSyncNum=cmRec.syncNum
   CALL updateRecentsCursor(cmRec.cursor1.*,cmRec.cursor2.*)
   LET m_locationhref=cmRec.locationhref
   LET len=cmRec.modified.getLength()
@@ -1054,7 +1090,7 @@ PRIVATE FUNCTION syncInt(newVal)
     IF orgnum>=1 AND orgnum<=m_orglines.getLength() THEN
       LET line=cmRec.modified[i].line
       IF checkChanged(line,m_orglines[orgnum].line) THEN
-        --DISPLAY sfmt("patch line:%1 from:'%2' to:'%3'",orgnum,m_orglines[orgnum].line,line)
+        DISPLAY sfmt("patch line:%1 from:'%2' to:'%3'",orgnum,m_orglines[orgnum].line,line)
         CALL setModified()
         LET m_orglines[orgnum].line=line
       END IF
@@ -1069,9 +1105,9 @@ PRIVATE FUNCTION syncInt(newVal)
     LET m_modified=TRUE
     LET idx=cmRec.removed[i].idx+1
     LET len=cmRec.removed[i].len
-    --DISPLAY sfmt("delete lines:%1-%2",idx,idx+len-1)
+    DISPLAY sfmt("delete lines:%1-%2",idx,idx+len-1)
     FOR j=1 TO len
-      --DISPLAY "delete line:'",m_orglines[idx].line,"'"
+      DISPLAY "delete line:'",m_orglines[idx].line,"'"
       CALL m_orglines.deleteElement(idx)
     END FOR
   END FOR
@@ -1085,7 +1121,7 @@ PRIVATE FUNCTION syncInt(newVal)
     WHILE j<=m_orglines.getLength()
       IF m_orglines[j].orgnum==orgnum THEN
         LET len=cmRec.inserts[i].ilines.getLength()
-        --DISPLAY sfmt("insert %1 new lines at:%2",len,j+1)
+        DISPLAY sfmt("insert %1 new lines at:%2",len,j+1)
         FOR z=1 TO len
           LET insertpos=j+z
           CALL m_orglines.insertElement(insertpos)
@@ -1098,7 +1134,7 @@ PRIVATE FUNCTION syncInt(newVal)
     END WHILE
   END FOR
   LET m_lastCRC=cmRec.crc
-  CALL log(sfmt("len:%1, lineCount:%2,crc:",cmRec.len,cmRec.lineCount,m_cmRec.crc))
+  CALL log(sfmt("syncNum:%1,len:%2, lineCount:%3,crc:%4",cmRec.syncNum,cmRec.len,cmRec.lineCount,m_cmRec.crc))
   IF m_orglines.getLength()<>cmRec.lineCount THEN
     CALL err(SFMT("linecount local %1 != linecount remote %2",m_orglines.getLength(),cmRec.lineCount))
   END IF
@@ -1329,7 +1365,7 @@ PRIVATE FUNCTION compile_source(fname,proposals)
   IF code OR proposals THEN
     IF proposals THEN
       LET cmd=cmd,"&1"
-      CALL file_get_output(cmd,compile_arr)
+      CALL fglped_fileutils.file_get_output(cmd,compile_arr)
     ELSE
       CALL file_read_in_arr(tmpName,compile_arr)
       --RUN "cat "||tmpName
@@ -1734,13 +1770,15 @@ PRIVATE FUNCTION getFullTextAndRepair(fname)
     full STRING,
     crc32 BIGINT,
     lastChanges STRING,
-    lineCount INT
+    lineCount INT,
+    log STRING
   END RECORD
   DEFINE ret,bak,last STRING
   DEFINE crc BIGINT
   LET m_LastCRC=NULL
   CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getFullTextAndRepair"],[ret])
   CALL util.JSON.parse(ret,r)
+  CALL writeStringToFile("lastWCLog.log",r.log)
   LET last=m_lastEditorInstruction,"\ncodemirror lastChanges:",r.lastChanges
   CALL writeStringToFile("lastChanges.txt",last)
   LET bak=sfmt("%1.bak",fname)
@@ -1819,7 +1857,7 @@ END FUNCTION
 FUNCTION _file_uname()
   DEFINE arr DYNAMIC ARRAY OF STRING
   IF file_on_windows() THEN RETURN "Windows" END IF
-  CALL file_get_output("uname",arr)
+  CALL fglped_fileutils.file_get_output("uname",arr)
   IF arr.getLength()<1 THEN 
     RETURN "Unknown"
   END IF
@@ -2425,6 +2463,150 @@ FUNCTION mergeTopMenu(f,topmenu)
   CALL ntm1.writeXml(tmpName)
   CALL f.loadTopMenu(tmpName)
   CALL os.Path.delete(tmpName) RETURNING status
+END FUNCTION
+
+FUNCTION evalOM(om)
+  DEFINE om STRING
+  --CALL ui.Interface.frontCall("webcomponent","call",["formonly.wc","gmiEmitReceive",om],[])
+  --CURRENT WINDOW IS screen
+  --DISPLAY "om:",om
+  DISPLAY om TO webpreview
+  --CALL fgl_dialog_setbuffer(om)
+END FUNCTION
+
+FUNCTION getStyleListNode()
+  DEFINE root om.DomNode
+  DEFINE list om.NodeList
+  LET root=ui.Interface.getRootNode()
+  LET list=root.selectByTagName("StyleList")
+  IF list.getLength()>0 THEN
+    RETURN list.item(1)
+  END IF
+  RETURN NULL
+END FUNCTION
+
+FUNCTION initGBC()
+  DEFINE tmp42f STRING
+  LET m_gbcInitSeen=TRUE
+  IF NOT isPERFile(m_tmpname) THEN
+    CALL buildX("test")
+  ELSE
+    LET tmp42f=m_lastCompiledPER
+    LET tmp42f=tmp42f.subString(1,tmp42f.getLength()-4)
+    CALL buildX(tmp42f)
+  END IF
+END FUNCTION
+
+FUNCTION buildX(frmName)
+  DEFINE frmName STRING
+  DEFINE om STRING
+  DEFINE root,origList,newList,p om.DomNode
+  DEFINE win ui.Window
+  DEFINE f ui.Form
+  DISPLAY "buildX:",frmName
+  LET origList=getStyleListNode()
+  LET p=origList.getParent()
+  OPEN WINDOW _formpreview WITH FORM frmName
+  {
+  CALL p.removeChild(origList)
+  CALL ui.Interface.loadStyles("custom")
+  }
+  LET win=ui.Window.getCurrent()
+  LET f=win.getForm()
+  IF m_omCount==0 THEN
+    LET root=ui.Interface.getRootNode()
+  ELSE
+    LET root=win.getNode()
+  END IF
+  CALL removeWebComponentType(f.getNode())
+  LET om=buildOM(root,m_lastWindowId)
+  DISPLAY "om:",om
+  {
+  LET newList=getStyleListNode()
+  CALL p.replaceChild(origList,newList)
+  }
+  CLOSE WINDOW _formpreview
+  CALL evalOM(om)
+END FUNCTION
+
+FUNCTION buildOM(node,removeId)
+  DEFINE node,parentNode om.DomNode
+  DEFINE removeId,parentId INT
+  DEFINE b base.StringBuffer
+  LET b=base.StringBuffer.create()
+  CALL b.append(sfmt("om %1 {",m_omCount))
+  IF removeId<>0 THEN
+    CALL b.append(sfmt("{rn %1}",removeId))
+  END IF
+  LET parentNode=node.getParent()
+  LET parentId=IIF(parentNode IS NULL,0,parentNode.getId())
+  CALL b.append(sfmt("{an %1 ",parentId))
+  CALL buildListInt(node,b)
+  CALL b.append("}")
+  CALL b.append("}\n")
+  LET m_omCount=m_omCount+1
+  RETURN b.toString()
+END FUNCTION
+
+FUNCTION buildListInt(n,b) 
+  DEFINE n,c om.DomNode
+  DEFINE b,cb base.StringBuffer
+  DEFINE name,attr,tag,value STRING
+  DEFINE i,cnt INT
+  LET tag=n.getTagName()
+  CASE
+    WHEN tag=="Window"
+      LET name=n.getAttribute("name")
+      IF name.equals("_formpreview") THEN
+        DISPLAY "our window"
+        LET m_lastWindowId=n.getId()
+      ELSE
+        DISPLAY "omit WIndow:",name
+        RETURN
+      END IF
+    --WHEN tag=="Form"
+    --  LET m_lastFormId=n.getId()
+    WHEN tag=="Message"
+      DISPLAY "ignore message"
+      RETURN
+  END CASE
+ 
+  --IF tag=="Message" OR tag=="ActionDefaultList" OR tag=="ImageFonts" OR tag=="StyleList" THEN
+  --  RETURN
+  --END IF
+  CALL b.append(sfmt("%1 %2 {",n.getTagName(),n.getId()))
+  LET cnt=n.getAttributesCount()
+  FOR i=1 TO cnt
+    LET attr=n.getAttributeName(i)
+    LET value=n.getAttributeValue(i)
+    CASE
+      WHEN tag=="Window" AND attr=="parent"
+        CONTINUE FOR
+      WHEN tag=="UserInterface" AND attr=="runtimeStatus"
+        LET value="processing" --avoid focusing
+    END CASE
+    CALL b.append(sfmt('{%1 "%2"',attr,value))
+    CALL b.append(IIF(i<>cnt,"} ","}"))
+  END FOR
+  CALL b.append("}")
+  CALL b.append(" {")
+  --IF tag=="ActionDefaultList" OR (NOT parentTag.equals("Form") AND tag=="StyleList") THEN
+  IF tag=="ActionDefaultList" THEN
+    CALL b.append("}")
+    RETURN
+  END IF
+  LET c=n.getFirstChild()
+  WHILE c IS NOT NULL
+    LET cb=base.StringBuffer.create()
+    CALL buildListInt(c,cb)
+    LET c=c.getNext()
+    IF cb.getLength()>0 THEN
+      CALL b.append("{")
+      CALL b.append(cb.toString())
+      CALL b.append(IIF(c IS NOT NULL,"} ","}"))
+    END IF
+  END WHILE
+  CALL b.append("}")
 END FUNCTION
 
 FUNCTION assert(assertion_body)

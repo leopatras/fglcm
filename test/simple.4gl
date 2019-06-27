@@ -17,6 +17,7 @@ MAIN
   CALL test_new_file_from_arg_1()
   CALL test_new_file_from_arg_1_with_mod()
   CALL test_file_open()
+
 END MAIN
 
 FUNCTION setup_new_file()

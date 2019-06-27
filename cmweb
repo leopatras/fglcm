@@ -24,4 +24,7 @@ then
 fi
 export FGLRESOUREPATH=$FGLCMDIR:$FGLRESOURPATH
 export DBPATH=$FGLCMDIR:$DBPATH
+export FGLGUIDEBUG=1
+export VERBOSE=1
+#exec ~/w/fglwebrun/fglwebrun $FGLCMDIR/fglcm_main.42m "$@" 
 exec $FGLCMDIR/fglwebrun/fglwebrun $FGLCMDIR/fglcm_main.42m "$@" 
