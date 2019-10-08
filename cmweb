@@ -15,16 +15,16 @@ fullname () {
 SCRIPT_NAME=`fullname $0`
 export LANG="en_US.UTF-8"
 FGLCMDIR=`dirname $SCRIPT_NAME` 
-#we recompile everything always: hence avoid version clashes
-make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLCMDIR
 if [ -z "$FGLCM_EXT_DIR" ]
 then
   export FGLCM_EXT_DIR="$FGLCMDIR/ext"
 fi
+export FGLLDPATH="$FGLCM_EXT_DIR:$FGLCMDIR:$FGLCMDIR/fglwebrun:$FGLLDPATH"
+#we recompile everything always: hence avoid version clashes
+make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLRESOUREPATH=$FGLCMDIR:$FGLRESOURPATH
 export DBPATH=$FGLCMDIR:$DBPATH
 export FGLGUIDEBUG=1
 export VERBOSE=1
-#exec ~/w/fglwebrun/fglwebrun $FGLCMDIR/fglcm_main.42m "$@" 
 exec $FGLCMDIR/fglwebrun/fglwebrun $FGLCMDIR/fglcm_main.42m "$@" 
