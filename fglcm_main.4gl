@@ -28,15 +28,18 @@ PRIVATE FUNCTION edit_source()
   OPTIONS INPUT WRAP
   --the actions using fsync() are triggered by TopMenu/Genero Shortcuts
   --the actions using sync() are triggered from the code mirror webcomponent
-  INPUT fglcm.m_cm WITHOUT DEFAULTS FROM cm ATTRIBUTE(accept=FALSE,cancel=FALSE)
+  INPUT fglcm.m_cm
+      WITHOUT DEFAULTS
+      FROM cm
+      ATTRIBUTE(ACCEPT = FALSE, CANCEL = FALSE)
     BEFORE INPUT
-      CALL fglcm.before_input(DIALOG,TRUE)
+      CALL fglcm.before_input(DIALOG, TRUE)
 
-    ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
+    ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW = NO) --invoked by the editor
       CALL fglcm.setInitSeen()
 
     ON ACTION run
-      CALL fglcm.sync() 
+      CALL fglcm.sync()
       CALL fglcm.runprog()
 
     ON ACTION preview
@@ -49,19 +52,19 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.doClose(TRUE)
 
-    --ON KEY(TAB)
-    --  DISPLAY "!!!TAB!!!"
-    --  CALL fglcm.sync() 
-    --  CALL fglcm.doComplete()
+      --ON KEY(TAB)
+      --  DISPLAY "!!!TAB!!!"
+      --  CALL fglcm.sync()
+      --  CALL fglcm.doComplete()
     ON ACTION complete --triggered by WC
       DISPLAY "!!!Complete!!!"
-      CALL fglcm.sync() 
+      CALL fglcm.sync()
       CALL fglcm.doComplete()
 
     ON ACTION find
       CALL fglcm.sync()
       CALL fglcm.doFind()
-      
+
     ON ACTION replace
       CALL fglcm.sync()
       CALL fglcm.doReplace()
@@ -70,20 +73,20 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.doGotoLine()
 
-    ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
+    ON ACTION update ATTRIBUTE(DEFAULTVIEW = NO) --invoked by the editor
       CALL fglcm.sync()
       IF NOT fglcm.actionPending() THEN
         CALL fglcm.doCompile(FALSE)
       END IF
 
-    ON ACTION compile ATTRIBUTE(DEFAULTVIEW=NO)
+    ON ACTION compile ATTRIBUTE(DEFAULTVIEW = NO)
       CALL fglcm.sync()
       CALL fglcm.doCompile(TRUE) --jumps to the first error
 
     ON ACTION new --triggered by TopMenu
       CALL fglcm.sync()
       CALL fglcm.doFileNew()
-      
+
     ON ACTION open --triggered by TopMenu
       CALL fglcm.sync()
       CALL fglcm.doFileOpen(NULL)
@@ -110,7 +113,8 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.initGBC()
 
     ON ACTION getlog
-      CALL ui.Interface.frontCall("webcomponent","call",["formonly.cm","getLog"],[log])
+      CALL ui.Interface.frontCall(
+          "webcomponent", "call", ["formonly.cm", "getLog"], [log])
 
     ON ACTION fglcm_ext1
       CALL fglcm.sync()
