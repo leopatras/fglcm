@@ -78,7 +78,7 @@ cmdemo.42f: $(FGLDIR)/demo/demo.sch cmdemo.per
 	FGLDBPATH=$(FGLDIR)/demo fglform -M -Wall cmdemo.per
 
 runcmdemo: cmdemo.42m cmdemo.42f
-	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun cmdemo
+	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun -d cmdemo
 
 fiddle: all cmdemo.42m cmdemo.42f
 	rm -rf home&&mkdir home

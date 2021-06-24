@@ -2,9 +2,16 @@
 var m_syncLocal=false;
 var m_syncNum=0;
 var m_logStr="";
+var m_active=false;
+var m_data=null;
+var m_dataId=null;
 function mylog(s) {
   m_logStr=(m_logStr=="")?s:(m_logStr+"\n"+s);
   console.log(s);
+}
+function myErr(s) {
+  mylog("ERROR:"+s);
+  alert("ERROR:"+s);
 }
 
 try {
@@ -151,6 +158,7 @@ var m_lastChanges=null;
 var m_InAction=false;
 var m_search_history=[];
 var m_search_idx=-1;
+var m_cmdIdx=-1;
 //var m_lastData="";
 
 function initCRCTable(){
@@ -597,8 +605,9 @@ function prepareRemoves(orgremoved,fromLine,toLine) {
 
 function checkUpdate(what) {
   clearUpdateTimer();
-  if (m_dataPending) {
-    mylog("datapending in update");
+  if (m_dataPending || !m_active) {
+    //we must not send updates if the VM side has data pending or isn't receiving 
+    mylog("checkUpdate: datapending:"+m_dataPending+" || !m_active:"+!m_active);
     m_updateOnData=(m_updateOnData===null)?"update":m_updateOnData;
     return;
   }
@@ -874,6 +883,14 @@ function createEditor(ext) {
             return false;
           }
    };
+   extraKeys["Ctrl-N"]=extraKeys["Alt-N"];
+   extraKeys["Ctrl-O"]=extraKeys["Alt-O"];
+   extraKeys["Ctrl-S"]=extraKeys["Alt-S"];
+   extraKeys["Ctrl-F"]=extraKeys["Alt-F"];
+   extraKeys["Ctrl-Q"]=extraKeys["Alt-Q"];
+   extraKeys["Ctrl-L"]=extraKeys["Alt-L"];
+   extraKeys["Ctrl-T"]=extraKeys["Alt-T"];
+   extraKeys["Ctrl-W"]=extraKeys["Alt-W"];
    var is4GLOrPer=fIs4GLOrPer(ext);
    if (is4GLOrPer) {
      lint = { 'getAnnotations': myAnnotations, 'lintOnChange': false };
@@ -1019,6 +1036,13 @@ function clearUpdateTimer() {
   }
 }
 
+function clearDataTimer() {
+  if (m_dataId!==null) { 
+    clearTimeout(m_dataId); 
+    m_dataId=null; 
+  }
+}
+
 function setEditorEnabled(enabled) {
   if (m_editor===null) { return; }
   m_editor.setOption("readOnly", enabled ? false : "nocursor");
@@ -1042,19 +1066,45 @@ onICHostReady = function(version) {
        m_editor.focus();
      }
    }
+   scheduleProcessData=function() {
+     //as the order of events onData and onStateChanged is undetermined
+     //(what a great decision...)
+     //we need to postpone the data processing until either one or both have been fired
+     clearDataTimer();
+     m_dataId = setTimeout(function() { processData(m_data); m_data=null }, 0);
+   }
    gICAPI.onData = function(data) {
      //alert("onData:"+data);
-     mylog("onData:"+data+",m_updateOnData:"+m_updateOnData);
+     mylog("onData:"+data);
+     if (m_data) {
+       myErr("gICAPI.onData: a previous dataset was pending:"+m_data+",data:"+data);
+       processData(m_data); 
+     }
      if (data===undefined || data===null) {
        alert("onData with undefined or null, check your code!!!");
        return;
      }
+     m_data=data;
+     scheduleProcessData();
+   }
+   processData = function(data) {
+     clearDataTimer();
+     mylog("processData:"+data+",m_updateOnData:"+m_updateOnData);
+     if (data===null) {
+       return; //state update
+     }
      var o=JSON.parse(data);
      //mylog("onData m_state:"+m_state+",data:"+data);
      if (!o.vm) { //change was not issued by 4GL side ..GBC problem???
+       mylog("!!!!!processData: o.vm not set:"+data);
        //checkUpdateOnData();
        return;
      } 
+     if (o.cmdIdx<=m_cmdIdx) { //change was already sent, ignore
+       mylog("o.cmdIdx:"+o.cmdIdx+" <= m_cmdIdx:"+m_cmdIdx);
+       return;
+     }
+     m_cmdIdx = o.cmdIdx;
      if (o.flushTimeout!==undefined) {
        m_flushTimeout=o.flushTimeout;
      }
@@ -1089,9 +1139,12 @@ onICHostReady = function(version) {
        }
      }
      if (o.cursor1!==undefined) {
-       mylog("set cursor");
+       mylog("set cursor1:"+o.cursor1);
        if (o.cursor2===undefined) {
          o.cursor2=o.cursor1;
+         mylog(" cursor2==cursor1:"+o.cursor1);
+       } else {
+         mylog(" cursor2:"+o.cursor2);
        }
        m_editor.setSelection( o.cursor1,o.cursor2 );
      }
@@ -1135,13 +1188,16 @@ onICHostReady = function(version) {
   }*/
 
   gICAPI.onStateChanged=function(stateStr) {
+    mylog("onStateChanged:"+stateStr);
     var stateObj = JSON.parse(stateStr);
     //var dialogType = stateObj.dialogType;
     var active = stateObj.active;
+    m_active = active;
     setEditorEnabled(active);
+    scheduleProcessData();
   }
 
-  gICAPI.onProperty = function(p) { //do nothing
+  gICAPI.onProperty = function(p) { //do nothing as the trigger order is not reliable
   }
 }
 /*

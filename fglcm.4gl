@@ -20,7 +20,11 @@ CONSTANT S_ERROR = "Error"
 --error image
 CONSTANT IMG_ERROR = "stop"
 
+--CONSTANT TAG_TOOLBAR="ToolBar"
+--CONSTANT TAG_TOOLBARITEM="ToolBarItem"
+
 TYPE proparr_t DYNAMIC ARRAY OF STRING
+TYPE TStringDict DICTIONARY OF STRING
 --DEFINE m_om STRING
 DEFINE m_omCount INT
 DEFINE m_lastWindowId INT
@@ -48,9 +52,23 @@ DEFINE _on_mac STRING --cache the file_on_mac
 DEFINE m_IsFiddle BOOLEAN
 DEFINE m_formatSource BOOLEAN
 DEFINE m_InitSeen BOOLEAN
+DEFINE m_gbcdir STRING
+DEFINE m_PreviewOrient STRING
+DEFINE m_hiddenTB om.DomNode
 --CONSTANT HIGHBIT32=2147483648 -- == 0x80000000
 TYPE RecentsEntry RECORD
   fileName STRING,
+  cursor1 RECORD
+    line INT,
+    ch INT
+  END RECORD,
+  cursor2 RECORD
+    line INT,
+    ch INT
+  END RECORD
+END RECORD
+
+TYPE CmCursor RECORD
   cursor1 RECORD
     line INT,
     ch INT
@@ -66,6 +84,7 @@ TYPE ModelArray DYNAMIC ARRAY OF RECORD
   orgnum INT
 END RECORD
 
+DEFINE m_mark CmCursor
 DEFINE m_recents DYNAMIC ARRAY OF RecentsEntry
 DEFINE m_lastEditorInstruction STRING
 
@@ -151,6 +170,7 @@ FUNCTION resetForQA() --reset all vars
   LET m_previewHidden = FALSE
   INITIALIZE m_NewFileExt TO NULL
   LET m_cmdIdx = 0
+  LET m_lastSyncNum = 0
   INITIALIZE m_lastCompiled4GL TO NULL
   INITIALIZE m_lastCompiledPER TO NULL
   INITIALIZE m_locationhref TO NULL
@@ -174,6 +194,25 @@ FUNCTION init_args()
     LET m_args[i] = arg_val(i)
   END FOR
   LET m_arg_0 = arg_val(0)
+  CALL initGBCWebCo()
+END FUNCTION
+
+FUNCTION initGBCWebCo()
+  DEFINE gbcdest, currver, gbcver, webco STRING
+  DISPLAY "initGBCWebCo()"
+  LET gbcdest = selfpathjoin("webcomponents/gbc")
+  CALL checkGBCAvailable()
+  _ASSERT(m_gbcdir IS NOT NULL)
+  LET gbcver = join(m_gbcdir, "VERSION")
+  LET currver = join(gbcdest, "VERSION")
+  LET webco = join(gbcdest, "gbc.html")
+  IF NOT file_equal(gbcver, currver, FALSE) OR NOT os.Path.exists(webco) THEN
+    DISPLAY "webco file newly created"
+    --CALL cpChecked(join(m_gbcdir,"index.html"),webco)
+  END IF
+  CALL cpGBCAssets2Dest(m_gbcdir, gbcdest)
+  --install our custom bootstrap file
+  --CALL cpChecked(selfpathjoin("gbc.bootstrap.js"),join(join(gbcdest,"js"),"gbc.bootstrap.js"))
 END FUNCTION
 
 FUNCTION setArgs(arg0, args)
@@ -229,6 +268,8 @@ FUNCTION init()
   LET cli = ui.Interface.getFrontEndName()
   LET ver = ui.Interface.getFrontEndVersion()
   LET fver = parseVersion(ver)
+  CALL patch_webco("fglcm")
+  --CALL patch_webco("gbc")
   DISPLAY "cli:", cli, ",fver:", fver
   IF cli == "GDC" AND fver < 3.1 THEN
     CALL err(
@@ -251,7 +292,8 @@ FUNCTION before_input(d, activateAndHideActions)
   DEFINE d ui.Dialog
   DEFINE activateAndHideActions BOOLEAN
   DEFINE i INT
-  IF activateAndHideActions THEN
+  DISPLAY "before_input"
+  IF activateAndHideActions AND d IS NOT NULL THEN
     CALL d.setActionActive("run", FALSE)
     CALL setPreviewActionActive(FALSE)
     CALL d.setActionActive("main4gl", m_IsFiddle)
@@ -264,10 +306,27 @@ FUNCTION before_input(d, activateAndHideActions)
       CALL d.setActionHidden(SFMT("fglcm_ext%1", i), TRUE)
     END FOR
   END IF
+  IF d IS NULL THEN
+    CALL checkPreviewOrientInit()
+    RETURN
+  END IF
   CALL initialize_when(TRUE)
-  CALL compileTmp(TRUE)
+  CALL compileTmp(m_PreviewOrient IS NULL)
   CALL display_full(FALSE, FALSE)
+  IF m_PreviewOrient IS NOT NULL THEN
+    LET m_PreviewOrient = NULL
+    CALL gotoMark()
+  END IF
   CALL flush_cm()
+END FUNCTION
+
+FUNCTION checkPreviewOrientInit()
+  _ASSERT(m_PreviewOrient IS NOT NULL)
+  CALL togglePreviewOrient2()
+  LET m_cmdIdx = 0
+  LET m_cm = NULL
+  LET m_lastCRC = NULL
+  LET m_lastSyncNum = 0
 END FUNCTION
 
 FUNCTION cleanup()
@@ -296,7 +355,7 @@ FUNCTION doClose(exit)
   END IF
   CALL deleteLog()
   IF exit THEN
-    EXIT PROGRAM 0
+    CALL myExit("doClose", 0)
   END IF
 END FUNCTION
 
@@ -342,6 +401,13 @@ FUNCTION getCurrentForm()
   RETURN w.getForm()
 END FUNCTION
 
+FUNCTION getCurrentFormNode()
+  DEFINE frm ui.Form
+  LET frm = getCurrentForm()
+  _ASSERT(frm IS NOT NULL)
+  RETURN frm.getNode()
+END FUNCTION
+
 FUNCTION setPreviewActionActive(active)
   DEFINE active BOOLEAN
   DEFINE f ui.Form
@@ -352,7 +418,7 @@ FUNCTION setPreviewActionActive(active)
   IF NOT m_IsFiddle THEN
     RETURN
   END IF
-  LET f = getCurrentForm()
+  LET f = getCurrentFormNode()
   LET fNode = f.getNode()
   LET nlist = fNode.selectByPath('//ToolBarItem[@name="preview"]')
   IF nlist.getLength() > 0 THEN
@@ -362,12 +428,10 @@ FUNCTION setPreviewActionActive(active)
 END FUNCTION
 
 FUNCTION hideOrShowPreview()
-  DEFINE f ui.Form
   DEFINE isPER, wasHidden BOOLEAN
   --IF NOT isGBC() THEN
   --  RETURN
   --END IF
-  LET f = getCurrentForm()
   LET isPER =
       (m_IsNewFile AND ((m_NewFileExt IS NOT NULL) AND (m_NewFileExt == "per")))
           OR isPERFile(m_srcfile)
@@ -375,7 +439,165 @@ FUNCTION hideOrShowPreview()
       m_srcfile, isPERFile(m_srcfile), isPER, NOT isPER)
   LET wasHidden = m_previewHidden
   LET m_previewHidden = NOT isPER
-  CALL f.setFieldHidden("formonly.webpreview", m_previewHidden)
+  CALL hidePreview(m_previewHidden)
+  CALL hidePreviewTBActions(m_previewHidden)
+END FUNCTION
+
+FUNCTION hidePreviewTBActions(hide)
+  DEFINE hide BOOLEAN
+  DEFINE frm ui.Form
+  DEFINE frmNode, tb, ch om.DomNode
+  DEFINE nl om.NodeList
+  DEFINE numhidden, num INT
+  DEFINE name STRING
+  LET frm = getCurrentForm()
+  LET frmNode = frm.getNode()
+  LET nl = frmNode.selectByTagName("ToolBar")
+  IF nl.getLength() == 0 THEN
+    IF (tb := m_hiddenTB) IS NULL THEN
+      RETURN
+    END IF
+  ELSE
+    LET tb = nl.item(1)
+  END IF
+  _ASSERT(tb IS NOT NULL)
+  LET ch = tb.getFirstChild()
+  WHILE ch IS NOT NULL
+    IF ch.getTagName() == "ToolBarItem" THEN
+      LET num = num + 1
+      LET name = ch.getAttribute("name")
+      _ASSERT(name IS NOT NULL)
+      IF name MATCHES "*preview*" THEN
+        CALL ch.setAttribute("hidden", hide)
+        LET numhidden = IIF(hide, numhidden + 1, numhidden)
+      ELSE
+        LET numhidden =
+            IIF(ch.getAttribute("hidden") == "1", numhidden + 1, numhidden)
+      END IF
+    END IF
+    LET ch = ch.getNext()
+  END WHILE
+  --hide the toolbar if all items are hidden
+  CALL hideToolBar(tb, hide AND numhidden == num)
+END FUNCTION
+
+FUNCTION hideToolBar(tb, hide)
+  DEFINE tb, p, fNode om.DomNode
+  DEFINE hide BOOLEAN
+  _ASSERT(tb IS NOT NULL)
+  IF hide THEN
+    LET m_hiddenTB = tb
+    LET p = tb.getParent()
+    CALL p.removeChild(tb)
+  ELSE
+    IF m_hiddenTB IS NOT NULL THEN
+      _ASSERT(m_hiddenTB.getParent() IS NULL)
+      LET fNode = getCurrentFormNode()
+      CALL fNode.appendChild(m_hiddenTB)
+      LET m_hiddenTB = NULL
+    END IF
+  END IF
+END FUNCTION
+
+FUNCTION nodeFromPath(p, path)
+  DEFINE p, n om.DomNode
+  DEFINE path STRING
+  DEFINE nl om.NodeList
+  _ASSERT(p IS NOT NULL)
+  LET nl = p.selectByPath(path)
+  _ASSERT(nl.getLength() == 1)
+  LET n = nl.item(1)
+  _ASSERT(n IS NOT NULL)
+  RETURN n
+END FUNCTION
+
+FUNCTION mvFromBoxToBoxInt(box1, box2, ff)
+  DEFINE box1, box2, ff, p om.DomNode
+  LET p = ff.getParent()
+  _ASSERT(p.getTagName() == "Grid")
+  CALL box1.removeChild(p)
+  CALL box2.appendChild(p)
+  CALL ff.setAttribute("hidden", "0")
+  CALL p.setAttribute("hidden", "0")
+END FUNCTION
+
+FUNCTION resetGBCWebCo()
+  LET m_omCount = 0
+  LET m_gbcInitSeen = FALSE
+  LET m_lastWindowId = 0
+  DISPLAY NULL TO webpreview
+END FUNCTION
+
+FUNCTION mvFromBoxToBox(box1, box2, ff1, ff2)
+  DEFINE box1, box2, ff1, ff2 om.DomNode
+  CALL mvFromBoxToBoxInt(box1, box2, ff1)
+  CALL mvFromBoxToBoxInt(box1, box2, ff2)
+  CALL box1.setAttribute("hidden", "1")
+  CALL box2.setAttribute("hidden", "0")
+END FUNCTION
+
+FUNCTION displayState()
+  DISPLAY "m_lastCRC:", m_lastCRC
+  DISPLAY "m_lastCompiled4GL:", m_lastCompiled4GL
+  DISPLAY "m_lastCompiledPER:", m_lastCompiledPER
+  DISPLAY "m_orglines:", util.JSON.stringify(m_orglines)
+  DISPLAY "m_savedlines:", util.JSON.stringify(m_savedlines)
+  DISPLAY "m_cmRec:", util.JSON.stringify(m_cmRec)
+  DISPLAY "m_cm:", m_cm
+END FUNCTION
+
+FUNCTION togglePreviewOrient1()
+  DEFINE fNode, ff1, p om.DomNode
+  CALL markCursor()
+  LET fNode = getCurrentFormNode()
+  LET ff1 = nodeFromPath(fNode, '//FormField[@name="formonly.cm"]')
+  --LET ff = nodeFromPath(fNode, '//FormField[@name="formonly.webpreview"]')
+  LET p = ff1.getParent()
+  _ASSERT(p.getTagName() == "Grid")
+  LET p = p.getParent()
+  LET m_PreviewOrient = p.getTagName()
+  --DISPLAY "togglePreviewOrient1 m_PreviewOrient:", m_PreviewOrient
+  --CALL displayState()
+END FUNCTION
+
+FUNCTION togglePreviewOrient2()
+  DEFINE fNode, ff1, ff2, p, p2, vbox, hbox om.DomNode
+  DEFINE ptag STRING
+  _ASSERT(m_PreviewOrient IS NOT NULL)
+  LET fNode = getCurrentFormNode()
+  LET ff1 = nodeFromPath(fNode, '//FormField[@name="formonly.cm"]')
+  LET ff2 = nodeFromPath(fNode, '//FormField[@name="formonly.webpreview"]')
+  LET p = ff1.getParent()
+  _ASSERT(p.getTagName() == "Grid")
+  LET p = p.getParent()
+  LET ptag = p.getTagName()
+  DISPLAY "m_PreviewOrient:", m_PreviewOrient, ",ptag:", ptag
+  IF ptag == "HBox" AND m_PreviewOrient == "VBox"
+      OR ptag == "VBox" AND m_PreviewOrient == "HBox" THEN
+    CALL ff2.setAttribute("hidden", "0")
+    LET p2 = ff2.getParent()
+    _ASSERT(p2.getTagName() == "Grid")
+    CALL p2.setAttribute("hidden", "0")
+    DISPLAY "orient already ok"
+  ELSE
+    IF ptag == "HBox" AND m_PreviewOrient == "HBox" THEN
+      LET vbox = nodeFromPath(fNode, '//VBox[@name="fglcm_vbox"]')
+      CALL mvFromBoxToBox(p, vbox, ff1, ff2)
+    ELSE
+      _ASSERT(m_PreviewOrient == "VBox")
+      LET hbox = nodeFromPath(fNode, '//HBox[@name="fglcm_hbox"]')
+      CALL mvFromBoxToBox(p, hbox, ff1, ff2)
+    END IF
+  END IF
+  CALL resetGBCWebCo()
+END FUNCTION
+
+FUNCTION hidePreview(hide)
+  DEFINE hide BOOLEAN
+  DEFINE f ui.Form
+  LET f = getCurrentForm()
+  CALL f.setElementHidden("fglcm_grid_webpreview", hide)
+  CALL f.setFieldHidden("formonly.webpreview", hide)
   {
   IF NOT wasHidden AND m_previewHidden THEN
     CALL os.Path.delete(getSession42f()) RETURNING dummy
@@ -392,10 +614,19 @@ FUNCTION openMainWindow()
     DISPLAY "close screen"
     CLOSE WINDOW screen
   END IF
-  OPEN WINDOW fglcm WITH FORM "fglcm"
-  LET m_mainFormOpen = TRUE
+  OPEN WINDOW fglcm AT 1, 1 WITH 10 ROWS, 10 COLUMNS
+  CALL displayForm()
   CALL checkFiddleBar()
   CALL hideOrShowPreview()
+END FUNCTION
+
+FUNCTION displayForm()
+  IF m_mainFormOpen THEN
+    CLOSE FORM fglcm
+  END IF
+  OPEN FORM fglcm FROM "fglcm"
+  DISPLAY FORM fglcm
+  LET m_mainFormOpen = TRUE
 END FUNCTION
 
 PRIVATE FUNCTION open_prepare()
@@ -518,7 +749,7 @@ END FUNCTION
 FUNCTION doComplete()
   DEFINE dummy STRING
   IF NOT my_write(m_tmpname, TRUE) THEN
-    EXIT PROGRAM 1
+    CALL myExit("doComplete", 1)
   END IF
   CALL initialize_when(TRUE)
   LET m_cmRec.proparr = complete()
@@ -558,6 +789,18 @@ FUNCTION doReplace()
   LET m_cmRec.cmCommand = "replace"
   CALL compileTmp(FALSE)
   CALL flush_cm()
+END FUNCTION
+
+FUNCTION markCursor()
+  LET m_mark.cursor1.* = m_cmRec.cursor1.*
+  LET m_mark.cursor2.* = m_cmRec.cursor2.*
+END FUNCTION
+
+FUNCTION gotoMark()
+  --CALL initialize_when(initialize)
+  LET m_cmRec.cursor1.* = m_mark.cursor1.*
+  LET m_cmRec.cursor2.* = m_mark.cursor2.*
+  --CALL flush_when(flush)
 END FUNCTION
 
 FUNCTION normalizeName(pwd, name)
@@ -741,7 +984,7 @@ FUNCTION getLiveURL(prog, arg)
   LET base =
       fgl_getenv(
           "FGL_VMPROXY_START_URL") --https://fglfiddle.com:443/gas/ua/r/cm
-  DISPLAY "base:", base, ",m_locationhref:", m_locationhref
+  --DISPLAY "base:",base,",m_locationhref:",m_locationhref
   IF base IS NOT NULL THEN
     --https://fglfiddle.com:443/gas/ua/r/_fglcm_preview
     RETURN myjoin(os.Path.dirName(base), SFMT("%1?Arg=%2", prog, arg))
@@ -762,7 +1005,7 @@ FUNCTION getLiveURL(prog, arg)
         AND dirname <> "."
         AND os.Path.baseName(dirname) <> "ua"
       LET base = dirname
-      DISPLAY "base:", base
+      --DISPLAY "base:",base
     END WHILE
     RETURN myjoin(myjoin(dirname, "r"), SFMT("%1&Arg=%2", prog, arg))
   END IF
@@ -819,8 +1062,9 @@ END FUNCTION
 
 FUNCTION livePreview(tmpname)
   DEFINE tmpname STRING
-  --DEFINE liveurl STRING
+  DEFINE liveurl STRING
   UNUSED_VAR(tmpname)
+  UNUSED_VAR(liveurl)
   IF NOT m_gbcInitSeen THEN
     DISPLAY "livePreview:no init"
     RETURN
@@ -1079,9 +1323,11 @@ FUNCTION fcsync() --called if our topmenu fired an action
     CALL log("fcsync:no init seen yet")
     RETURN
   END IF
-  DISPLAY "fcsync called"
+  DISPLAY "!!!!fcsync called!!!!"
   CALL ui.Interface.frontCall(
       "webcomponent", "call", ["formonly.cm", "fcsync"], [newVal])
+  DISPLAY "newVal:", newVal
+
   CALL syncInt(newVal)
 END FUNCTION
 
@@ -1193,6 +1439,7 @@ PRIVATE FUNCTION syncInt(newVal)
         SFMT("character count local %1 != character count remote %2",
             len, cmRec.len))
   END IF
+  --CALL displayState()
 END FUNCTION
 
 PRIVATE FUNCTION flush_cm()
@@ -1302,6 +1549,7 @@ PRIVATE FUNCTION display_full(initialize, flush)
       basename
   CALL flush_when(flush)
   LET m_lastCRC = NULL
+  CALL displayState()
 END FUNCTION
 
 FUNCTION setActionActive(name, active)
@@ -1868,7 +2116,7 @@ PRIVATE FUNCTION getFullTextAndRepair(fname)
       COMMAND "Continue Editing"
         EXIT WHILE
       COMMAND "Exit fglcm"
-        EXIT PROGRAM 1
+        CALL myExit("getFullTextAndRepair", 1)
     END MENU
   END WHILE
   LET crc = getCRCSum(fname)
@@ -1924,12 +2172,12 @@ PRIVATE FUNCTION checkCRCSum(fname)
   LET m_lastCRC = NULL
 END FUNCTION
 
+FUNCTION isWin()
+  RETURN os.Path.separator() == "\\"
+END FUNCTION
+
 FUNCTION file_on_windows()
-  IF fgl_getenv("WINDIR") IS NULL THEN
-    RETURN 0
-  ELSE
-    RETURN 1
-  END IF
+  RETURN os.Path.separator() == "\\"
 END FUNCTION
 
 FUNCTION _file_uname()
@@ -2631,7 +2879,7 @@ FUNCTION buildX(frmName)
   END IF
   CALL removeWebComponentType(f.getNode())
   LET om = buildOM(root, m_lastWindowId)
-  DISPLAY "om:", om
+  --DISPLAY "om:",om
   {
   LET newList=getStyleListNode()
   CALL p.replaceChild(origList,newList)
@@ -2778,4 +3026,378 @@ FUNCTION qaSendAction(actionName)
   DEFINE actionName STRING
   CALL ui.Interface.frontCall(
       "webcomponent", "call", ["formonly.cm", "qaSendAction", actionName], [])
+END FUNCTION
+
+FUNCTION getQueryDict(fn STRING) RETURNS(STRING, TStringDict)
+  DEFINE q, pstr, name, value STRING
+  DEFINE qidx, idx INT
+  DEFINE tok base.StringTokenizer
+  DEFINE d TStringDict
+  LET qidx = fn.getIndexOf("?", 1)
+  IF qidx == 0 THEN
+    RETURN fn, d
+  END IF
+  LET q = fn.subString(qidx + 1, fn.getLength())
+  LET tok = base.StringTokenizer.create(q, "&")
+  WHILE tok.hasMoreTokens()
+    LET pstr = tok.nextToken()
+    IF (idx := pstr.getIndexOf("=", 1)) != 0 THEN
+      LET name = pstr.subString(1, idx - 1)
+      LET value = pstr.subString(idx + 1, pstr.getLength())
+      LET d[name] = value
+    END IF
+  END WHILE
+  --DISPLAY "getQueryDict:", util.JSON.stringify(d)
+  RETURN fn.subString(1, qidx - 1), d
+END FUNCTION
+
+FUNCTION getLastModified(fn STRING)
+  DEFINE m INT
+  LET m = util.Datetime.toSecondsSinceEpoch(os.Path.mtime(fn))
+  RETURN m
+END FUNCTION
+
+FUNCTION formatUrl(fn STRING, d TStringDict)
+  DEFINE i INT
+  DEFINE keys DYNAMIC ARRAY OF STRING
+  DEFINE o, key STRING
+  LET o = fn
+  LET keys = d.getKeys()
+  FOR i = 1 TO keys.getLength()
+    LET o = o, IIF(i == 1, "?", "&")
+    LET key = keys[i]
+    LET o = o, key, "=", d[key]
+  END FOR
+  RETURN o
+END FUNCTION
+
+FUNCTION findScriptOrLink(l STRING, dir STRING)
+  DEFINE i1, i2, i3, i4, i5 INT
+  DEFINE fn, fn2, fn3 STRING
+  DEFINE d TStringDict
+  IF ((i1 := l.getIndexOf("<script", 1)) > 0
+          OR (i1 := l.getIndexOf("<link", 1)))
+      AND ((i2 := l.getIndexOf("src", i1)) > 0
+          OR (i2 := l.getIndexOf("href", i1)) > 0)
+      AND (i3 := l.getIndexOf("=", i2)) > 0
+      AND (i4 := l.getIndexOf('"', i3)) > 0
+      AND (i5 := l.getIndexOf('"', i4 + 1)) > 0 THEN
+    LET fn = l.subString(i4 + 1, i5 - 1)
+    --DISPLAY "fn:'",fn,"'"
+    CALL getQueryDict(fn) RETURNING fn, d
+    LET fn2 = os.Path.join(dir, fn)
+    IF os.Path.exists(fn2) THEN
+      LET d["s"] = os.Path.size(fn2)
+      LET d["t"] = getLastModified(fn2)
+      LET fn3 = formatUrl(fn, d)
+      LET l = l.subString(1, i4), fn3, l.subString(i5, l.getLength())
+      DISPLAY "did format l:", l
+    ELSE
+      DISPLAY "fn2:", fn2, " does not exists"
+    END IF
+  END IF
+  RETURN l
+END FUNCTION
+
+FUNCTION fileContentEqual(f1 STRING, f2 STRING) RETURNS BOOLEAN
+  DEFINE code INT
+  IF fgl_getenv("WINDIR") IS NOT NULL OR fgl_getenv("windir") IS NOT NULL THEN
+    RUN SFMT("fc %1 %2", f1, f2) RETURNING code
+  ELSE
+    RUN SFMT("diff %1 %2", f1, f2) RETURNING code
+  END IF
+  RETURN code == 0
+END FUNCTION
+
+--puts size and time queries into the assets referenced by the webco to enable caching
+FUNCTION patch_webco(compo STRING)
+  DEFINE ch, co base.Channel
+  DEFINE line, dir, fn, tmp STRING
+  LET fn = "webcomponents/", compo, "/", compo, ".html"
+  LET fn = os.Path.join(os.Path.dirName(arg_val(0)), fn)
+  IF NOT os.Path.exists(fn) THEN
+    LET fn = compo, ".html"
+  END IF
+  LET dir = os.Path.dirName(fn)
+  DISPLAY "patch_webco:", fn
+  LET ch = base.Channel.create()
+  LET co = base.Channel.create()
+  LET tmp = os.Path.makeTempName()
+  CALL co.openFile(tmp, "w")
+  CALL ch.openFile(fn, "r")
+  WHILE (line := ch.readLine()) IS NOT NULL
+    --LET line=line.trimWhiteSpace()
+    LET line = findScriptOrLink(line, dir)
+    CALL co.writeLine(line)
+  END WHILE
+  CALL ch.close()
+  CALL co.close()
+  IF os.Path.size(fn) <> os.Path.size(tmp)
+      OR (NOT file_equal(fn, tmp, FALSE)) THEN
+    DISPLAY SFMT("copy:%1 (%2 bytes) over:%3 (%4 bytes)",
+        tmp, os.Path.size(tmp), fn, os.Path.size(fn))
+    CALL os.Path.copy(tmp, fn) RETURNING status
+    CALL os.Path.delete(tmp) RETURNING status
+  ELSE
+    DISPLAY "file equal:", tmp, " to:", fn
+  END IF
+END FUNCTION
+
+FUNCTION cpChecked(src, dest)
+  DEFINE src, dest STRING
+  IF os.Path.size(src) == os.Path.size(dest)
+      AND file_equal(src, dest, FALSE) THEN
+    --DISPLAY sfmt("cpChecked: '%1' already copied to '%2'",src,dest)
+    RETURN
+  END IF
+  _ASSERT(src.getIndexOf("..", 1) == 0)
+  _ASSERT(dest.getIndexOf("..", 1) == 0)
+  IF NOT os.Path.copy(src, dest) THEN
+    CALL myErr(SFMT("cpChecked: can't copy '%1' to '%2'", src, dest))
+  ELSE
+    --DISPLAY sfmt("cpChecked '%1'->'%2'",src,dest)
+  END IF
+END FUNCTION
+
+FUNCTION file_equal_txtfile(f1, f2)
+  DEFINE f1, f2 STRING
+  DEFINE t1, t2 TEXT
+  DEFINE s1, s2 STRING
+  LOCATE t1 IN FILE f1
+  LET s1 = t1
+  LOCATE t2 IN FILE f2
+  LET s2 = t2
+  --DISPLAY "file_equal_txtfile: ",f1," ",f2
+  IF NOT s1.equals(s2) THEN
+    DISPLAY "not equal:", f1, "<>", f2
+    IF NOT isWin() THEN
+      RUN SFMT("diff %1 %2", quote(f1), quote(f2))
+    END IF
+    RETURN FALSE
+  END IF
+  RETURN TRUE
+END FUNCTION
+
+FUNCTION file_equal(f1, f2, ignorecase)
+  DEFINE f1, f2 STRING
+  DEFINE ignorecase BOOLEAN
+  DEFINE cmd, tool, opt, ext STRING
+  DEFINE code INTEGER
+  IF NOT os.Path.exists(f1)
+      OR NOT os.Path.exists(f2)
+      OR os.Path.size(f1) <> os.Path.size(f2) THEN
+    RETURN FALSE
+  END IF
+  LET ext = os.Path.extension(f1)
+  IF (NOT ignorecase)
+      AND (ext == "js"
+          OR ext == "txt"
+          OR ext == "html"
+          OR ext == "css"
+          OR ext == "4gl"
+          OR ext == "per"
+          OR ext == "42f"
+          OR ext == "4st"
+          OR ext == "4ad"
+          OR ext == "4tb"
+          OR ext == "svg") THEN
+    RETURN file_equal_txtfile(f1, f2)
+  END IF
+  --DISPLAY "ignore case:",ignorecase,",ext:",ext
+  IF ignorecase THEN
+    LET opt = IIF(isWin(), "/c", "-i")
+  END IF
+  LET tool = IIF(isWin(), "fc", "diff")
+  LET cmd = SFMT("%1 %2 %3 %4", tool, opt, quote(f1), quote(f2))
+  RUN cmd RETURNING code
+  RETURN (code == 0)
+END FUNCTION
+
+FUNCTION cpGBCAssets2Dest(dir, destdir)
+  DEFINE dir, destdir STRING
+  DEFINE dh INT
+  DEFINE fname, dest, fullName, ext STRING
+  LET dh = os.Path.dirOpen(dir)
+  IF dh == 0 THEN
+    RETURN
+  END IF
+  WHILE (fname := os.Path.dirNext(dh)) IS NOT NULL
+    IF fname IS NULL
+        OR fname == "."
+        OR fname == ".."
+        OR fname == "webcomponents" THEN
+      CONTINUE WHILE
+    END IF
+    LET ext = os.Path.extension(fname)
+    IF ext == "gz" THEN
+      CONTINUE WHILE
+    END IF
+    LET fullName = join(dir, fname)
+    LET dest = join(destdir, fname)
+    --DISPLAY "fname:",fname,",fullName:",fullName,",dest:",dest
+    IF os.Path.isDirectory(fullName) THEN
+      CALL mkdir(dest)
+      CALL cpGBCAssets2Dest(fullName, dest)
+    ELSE
+      --IF NOT fname.equals("gbc.bootstrap.js") THEN
+      CALL cpChecked(fullName, dest)
+      --END IF
+    END IF
+  END WHILE
+  CALL os.Path.dirClose(dh)
+END FUNCTION
+
+PRIVATE FUNCTION _findGBCIn(dirname)
+  DEFINE dirname STRING
+  IF os.Path.exists(os.Path.join(dirname, "index.html"))
+      AND os.Path.exists(os.Path.join(dirname, "index.html"))
+      AND os.Path.exists(os.Path.join(dirname, "VERSION")) THEN
+    LET m_gbcdir = dirname
+    DISPLAY "m_gbcdir:'", m_gbcdir, "'"
+    RETURN TRUE
+  END IF
+  RETURN FALSE
+END FUNCTION
+
+FUNCTION checkGBCAvailable()
+  IF NOT _findGBCIn(os.Path.join(os.Path.pwd(), "gbc")) THEN
+    IF NOT _findGBCIn(fgl_getenv("FGLGBCDIR")) THEN
+      IF NOT _findGBCIn(
+          os.Path.join(fgl_getenv("FGLDIR"), "web_utilities/gbc/gbc")) THEN
+        CALL myErr(
+            "Can't find a GBC in <pwd>/gbc, fgl_getenv('FGLGBCDIR') or $FGLDIR/web_utilities/gbc/gbc")
+      END IF
+    END IF
+  END IF
+END FUNCTION
+
+FUNCTION myErr(errstr STRING)
+  DEFINE ch base.Channel
+  LET ch = base.Channel.create()
+  CALL ch.openFile("<stderr>", "w")
+  CALL ch.writeLine(
+      SFMT("ERROR:%1 stack:\n%2", errstr, base.Application.getStackTrace()))
+  CALL ch.close()
+  EXIT PROGRAM 1
+END FUNCTION
+
+FUNCTION mkdir(d)
+  DEFINE d STRING
+  IF NOT os.Path.exists(d) THEN
+    _ASSERT(os.Path.mkdir(d) == TRUE)
+  END IF
+END FUNCTION
+
+FUNCTION mkdirp(basedir, path)
+  DEFINE basedir, path, part STRING
+  DEFINE tok base.StringTokenizer
+  LET tok = base.StringTokenizer.create(path, "/")
+  LET part = basedir
+  WHILE tok.hasMoreTokens()
+    LET part = os.Path.join(part, tok.nextToken())
+    IF NOT os.Path.exists(part) THEN
+      IF NOT os.Path.mkdir(part) THEN
+        CALL myErr(SFMT("can't create directory:%1", part))
+      ELSE
+        --DISPLAY "did mkdir:",part
+      END IF
+    END IF
+    --LET part=part,os.Path.separator()
+  END WHILE
+END FUNCTION
+
+FUNCTION fileMustExist(name, mustbelink)
+  DEFINE name STRING
+  DEFINE mustbelink BOOLEAN
+  IF NOT os.Path.exists(name) THEN
+    CALL myErr(SFMT("can't find '%1'", name))
+  END IF
+  IF mustbelink AND NOT os.Path.isLink(name) THEN
+    CALL myErr(SFMT("'%1' must be a link", name))
+  END IF
+END FUNCTION
+
+FUNCTION replacechar(fname, chartoreplace, replacechar)
+  DEFINE fname, chartoreplace, replacechar STRING
+  DEFINE buf base.StringBuffer
+  DEFINE prev, idx INTEGER
+  LET buf = base.StringBuffer.create()
+  CALL buf.append(fname)
+  LET prev = 1
+  WHILE (idx := buf.getIndexOf(chartoreplace, prev)) <> 0
+    CALL buf.replaceAt(idx, 1, replacechar)
+    LET prev = idx
+  END WHILE
+  RETURN buf.toString()
+END FUNCTION
+
+FUNCTION nativePath(fname)
+  DEFINE fname STRING
+  RETURN IIF(isWin(), replacechar(fname, "/", "\\"), fname)
+END FUNCTION
+
+PRIVATE FUNCTION join(arg1, arg2)
+  DEFINE arg1, arg2 STRING
+  RETURN os.Path.join(arg1, arg2)
+END FUNCTION
+
+FUNCTION already_quoted(path)
+  DEFINE path, first, last STRING
+  LET first = NVL(path.getCharAt(1), "NULL")
+  LET last = NVL(path.getCharAt(path.getLength()), "NULL")
+  IF isWin() THEN
+    RETURN (first == '"' AND last == '"')
+  END IF
+  RETURN (first == "'" AND last == "'") OR (first == '"' AND last == '"')
+END FUNCTION
+
+FUNCTION quote(path)
+  DEFINE path STRING
+  IF path.getIndexOf(" ", 1) > 0 THEN
+    IF NOT already_quoted(path) THEN
+      LET path = '"', path, '"'
+    END IF
+  ELSE
+    IF already_quoted(path) AND isWin() THEN --remove quotes(Windows)
+      LET path = path.subString(2, path.getLength() - 1)
+    END IF
+  END IF
+  RETURN path
+END FUNCTION
+
+FUNCTION nodeDesc(n om.DomNode)
+  DEFINE i, len INT
+  DEFINE sb base.StringBuffer
+  LET sb = base.StringBuffer.create()
+  CALL sb.append(n.getTagName())
+  LET len = n.getAttributesCount()
+  FOR i = 1 TO len
+    CALL sb.append(
+        SFMT(" %1='%2'", n.getAttributeName(i), n.getAttributeValue(i)))
+  END FOR
+  RETURN sb.toString()
+END FUNCTION
+
+FUNCTION printOmInt(n om.DomNode, indent INT)
+  DEFINE x STRING
+  DEFINE ch om.DomNode
+  DEFINE i INT
+  FOR i = 1 TO indent
+    LET x = x, " "
+  END FOR
+  LET x = x, nodeDesc(n)
+  --LET x = x
+  DISPLAY x
+  LET ch = n.getFirstChild()
+  WHILE ch IS NOT NULL
+    CALL printOmInt(ch, indent + 2)
+    LET ch = ch.getNext()
+  END WHILE
+END FUNCTION
+
+FUNCTION myExit(where, code)
+  DEFINE where STRING
+  DEFINE code INT
+  DISPLAY "EXIT PROGRAM from:", where, ", code:", code
+  EXIT PROGRAM code
 END FUNCTION

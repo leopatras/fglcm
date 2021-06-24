@@ -1,7 +1,10 @@
 IMPORT os
 IMPORT FGL fglcm
 IMPORT FGL fglcm_ext
+DEFINE starttime DATETIME HOUR TO FRACTION(1)
+DEFINE diff INTERVAL MINUTE TO FRACTION(1)
 MAIN
+  LET starttime=CURRENT
   CALL fglcm.init_args()
   CALL main2(TRUE)
 END MAIN
@@ -13,12 +16,16 @@ FUNCTION main2(enter_main_loop)
   --CALL ui.Form.setDefaultInitializer("fglcm_ext_form_init")
   IF NOT fglcm.initSrcFile(fglcm.my_arg_val(1)) THEN
     CALL fglcm.deleteLog()
-    EXIT PROGRAM 1
+    CALL fglcm.myExit("main2",1)
   END IF
   CALL fglcm.openMainWindow()
   CALL fglcm_ext.initMainWindow()
   IF enter_main_loop THEN
-    CALL edit_source()
+    WHILE edit_source()
+      CALL fglcm.displayForm()
+      CALL fglcm_ext.initMainWindow()
+      CALL fglcm.before_input(NULL,FALSE)
+    END WHILE
   END IF
 END FUNCTION
 
@@ -33,16 +40,19 @@ PRIVATE FUNCTION edit_source()
       FROM cm
       ATTRIBUTE(ACCEPT = FALSE, CANCEL = FALSE)
     BEFORE INPUT
-      CALL fglcm.before_input(DIALOG, TRUE)
+      CALL fglcm.before_input(DIALOG,TRUE)
+      CALL DIALOG.setActionActive("preview_toggle_orient","0")
 
     ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW = NO) --invoked by the editor
       CALL fglcm.setInitSeen()
+      CALL DIALOG.setActionActive("preview_toggle_orient","1")
 
     ON ACTION run
       CALL fglcm.sync()
       CALL fglcm.runprog()
 
     ON ACTION preview
+      CALL fglcm.sync() 
       CALL fglcm.preview_form()
 
     ON ACTION showpreviewurl
@@ -73,7 +83,8 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.doGotoLine()
 
-    ON ACTION update ATTRIBUTE(DEFAULTVIEW = NO) --invoked by the editor
+    ON ACTION update ATTRIBUTE(DEFAULTVIEW=NO) --invoked by the editor
+      DISPLAY "!!!update!!!"
       CALL fglcm.sync()
       IF NOT fglcm.actionPending() THEN
         CALL fglcm.doCompile(FALSE)
@@ -107,10 +118,26 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.formatSource()
 
+    ON ACTION show_preview
+      CALL fglcm.sync()
+      CALL fglcm.hidePreview(FALSE)
+
+    ON ACTION hide_preview
+      CALL fglcm.sync()
+      CALL fglcm.hidePreview(TRUE)
+
+    ON ACTION preview_toggle_orient
+      CALL fglcm.sync()
+      CALL fglcm.togglePreviewOrient1()
+      DISPLAY "after toggle"
+      RETURN TRUE
+
     ON ACTION urready
       DISPLAY "urready"
-      CALL fglcm.sync()
       CALL fglcm.initGBC()
+      LET diff = CURRENT - starttime
+      DISPLAY "diff=",diff
+
 
     ON ACTION getlog
       CALL ui.Interface.frontCall(
@@ -160,4 +187,6 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.browse_demos()
 
   END INPUT
+  DISPLAY "after end input"
+  RETURN FALSE
 END FUNCTION

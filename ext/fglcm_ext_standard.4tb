@@ -1,0 +1,6 @@
+<ToolBar name="tb" >
+   <ToolBarItem name="preview" image="fa-arrows-alt" comment="Full Form Preview" text="Full Preview" />
+   <ToolBarItem name="show_preview" />
+   <ToolBarItem name="hide_preview" />
+   <ToolBarItem name="preview_toggle_orient" image="preview_horizontal"/>
+</ToolBar>

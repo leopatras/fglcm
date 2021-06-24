@@ -28,3 +28,4 @@ rm -f $FGLCM_LOGFILE
 export FGLCM_LOGFILE="$FGLCM_LOGFILE.log"
 echo "logging into $FGLCM_LOGFILE" 
 exec fglrun --start-guilog=$FGLCM_LOGFILE $FGLCMDIR/fglcm_main.42m "$@" 
+#exec fglrun $FGLCMDIR/fglcm_main.42m "$@" 
