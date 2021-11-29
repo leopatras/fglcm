@@ -152,6 +152,8 @@ DEFINE m_args DYNAMIC ARRAY OF STRING
 DEFINE m_qa_chooseFileName STRING
 DEFINE m_qa_saveAsFileName STRING
 DEFINE m_qa_file_new_ext STRING
+DEFINE m_previewFF om.DomNode
+DEFINE m_dummyFF om.DomNode
 
 FUNCTION resetForQA() --reset all vars
   INITIALIZE m_cm TO NULL
@@ -199,7 +201,7 @@ END FUNCTION
 
 FUNCTION initGBCWebCo()
   DEFINE gbcdest, currver, gbcver, webco STRING
-  DISPLAY "initGBCWebCo()"
+  --DISPLAY "initGBCWebCo()"
   LET gbcdest = selfpathjoin("webcomponents/gbc")
   CALL checkGBCAvailable()
   _ASSERT(m_gbcdir IS NOT NULL)
@@ -207,7 +209,7 @@ FUNCTION initGBCWebCo()
   LET currver = join(gbcdest, "VERSION")
   LET webco = join(gbcdest, "gbc.html")
   IF NOT file_equal(gbcver, currver, FALSE) OR NOT os.Path.exists(webco) THEN
-    DISPLAY "webco file newly created"
+    --DISPLAY "webco file newly created"
     --CALL cpChecked(join(m_gbcdir,"index.html"),webco)
   END IF
   CALL cpGBCAssets2Dest(m_gbcdir, gbcdest)
@@ -270,19 +272,20 @@ FUNCTION init()
   LET fver = parseVersion(ver)
   CALL patch_webco("fglcm")
   --CALL patch_webco("gbc")
-  DISPLAY "cli:", cli, ",fver:", fver
+  CALL log(SFMT("cli:%1,fver:%2", cli, fver))
   IF cli == "GDC" AND fver < 3.1 THEN
     CALL err(
         SFMT("You need a GDC version>=3.10 to run fglcm, you have GDC version:%1",
             ver))
   END IF
   LET m_IsFiddle = fgl_getenv("FGLFIDDLE") IS NOT NULL
+  --DISPLAY "m_IsFiddle:", m_IsFiddle
   CALL ui.Interface.loadStyles("fglcm")
   --CALL initCRC32Table()
   CALL loadKeywords()
   LET m_lastCRC = NULL
   LET m_CRCProg = os.Path.fullPath(selfpathjoin("crc32"))
-  DISPLAY "m_CRCProg:", m_CRCProg
+  CALL log(SFMT("m_CRCProg:%1", m_CRCProg))
   IF NOT os.Path.exists(m_CRCProg) OR NOT os.Path.executable(m_CRCProg) THEN
     LET m_CRCProg = NULL
   END IF
@@ -292,7 +295,7 @@ FUNCTION before_input(d, activateAndHideActions)
   DEFINE d ui.Dialog
   DEFINE activateAndHideActions BOOLEAN
   DEFINE i INT
-  DISPLAY "before_input"
+  --DISPLAY "before_input,activateAndHideActions:", activateAndHideActions
   IF activateAndHideActions AND d IS NOT NULL THEN
     CALL d.setActionActive("run", FALSE)
     CALL setPreviewActionActive(FALSE)
@@ -339,7 +342,7 @@ FUNCTION deleteLog()
   DEFINE logfile STRING
   LET logfile = fgl_getenv("FGLCM_LOGFILE")
   IF logfile IS NOT NULL THEN
-    DISPLAY "remove log at :", logfile
+    CALL log(SFMT("remove log at :%1", logfile))
     CALL os.Path.delete(logfile) RETURNING status
   END IF
 END FUNCTION
@@ -359,20 +362,31 @@ FUNCTION doClose(exit)
   END IF
 END FUNCTION
 
-FUNCTION checkFiddleBar()
-  DEFINE f ui.Form
-  DEFINE fNode, tb om.DomNode
+FUNCTION getFormToolBar()
   DEFINE nlist om.NodeList
+  DEFINE fNode om.DomNode
+  LET fNode = getCurrentFormNode()
+  LET nlist = fNode.selectByTagName("ToolBar")
+  RETURN IIF(nlist.getLength() > 0, nlist.item(1), NULL)
+END FUNCTION
+
+FUNCTION removeFromParent(n)
+  DEFINE n, p om.DomNode
+  LET p = n.getParent()
+  IF p IS NOT NULL THEN
+    CALL p.removeChild(n)
+  END IF
+END FUNCTION
+
+FUNCTION checkFiddleBar()
+  DEFINE tb om.DomNode
   IF m_IsFiddle THEN
     RETURN
   END IF
   --remove the bar when not in fiddle mode
-  LET f = getCurrentForm()
-  LET fNode = f.getNode()
-  LET nlist = fNode.selectByTagName("ToolBar")
-  IF nlist.getLength() > 0 THEN
-    LET tb = nlist.item(1)
-    CALL fNode.removeChild(tb)
+  LET tb = getFormToolBar()
+  IF tb IS NOT NULL THEN
+    CALL removeFromParent(tb)
   END IF
 END FUNCTION
 
@@ -410,19 +424,16 @@ END FUNCTION
 
 FUNCTION setPreviewActionActive(active)
   DEFINE active BOOLEAN
+  DEFINE item om.DomNode
   DEFINE f ui.Form
-  DEFINE fNode, item om.DomNode
-  DEFINE nlist om.NodeList
   CALL setActionActive("preview", active)
   CALL setActionActive("showpreviewurl", active)
   IF NOT m_IsFiddle THEN
     RETURN
   END IF
-  LET f = getCurrentFormNode()
-  LET fNode = f.getNode()
-  LET nlist = fNode.selectByPath('//ToolBarItem[@name="preview"]')
-  IF nlist.getLength() > 0 THEN
-    LET item = nlist.item(1)
+  LET item = getToolBarItemByName("preview")
+  IF item IS NOT NULL THEN
+    LET f = getCurrentForm()
     CALL f.setElementHidden("preview", NOT active)
   END IF
 END FUNCTION
@@ -435,30 +446,23 @@ FUNCTION hideOrShowPreview()
   LET isPER =
       (m_IsNewFile AND ((m_NewFileExt IS NOT NULL) AND (m_NewFileExt == "per")))
           OR isPERFile(m_srcfile)
-  DISPLAY SFMT("hideOrShow m_srcfile:%1,isPERFile:%2,isPER:%3,hidden:%4",
-      m_srcfile, isPERFile(m_srcfile), isPER, NOT isPER)
+  CALL log(
+      SFMT("hideOrShow m_srcfile:%1,isPERFile:%2,isPER:%3,hidden:%4",
+          m_srcfile, isPERFile(m_srcfile), isPER, NOT isPER))
   LET wasHidden = m_previewHidden
   LET m_previewHidden = NOT isPER
-  CALL hidePreview(m_previewHidden)
   CALL hidePreviewTBActions(m_previewHidden)
+  CALL hidePreview(m_previewHidden)
 END FUNCTION
 
 FUNCTION hidePreviewTBActions(hide)
   DEFINE hide BOOLEAN
-  DEFINE frm ui.Form
-  DEFINE frmNode, tb, ch om.DomNode
-  DEFINE nl om.NodeList
+  DEFINE tb, ch om.DomNode
   DEFINE numhidden, num INT
   DEFINE name STRING
-  LET frm = getCurrentForm()
-  LET frmNode = frm.getNode()
-  LET nl = frmNode.selectByTagName("ToolBar")
-  IF nl.getLength() == 0 THEN
-    IF (tb := m_hiddenTB) IS NULL THEN
-      RETURN
-    END IF
-  ELSE
-    LET tb = nl.item(1)
+  LET tb = getFormToolBar()
+  IF tb IS NULL AND (tb := m_hiddenTB) IS NULL THEN
+    RETURN
   END IF
   _ASSERT(tb IS NOT NULL)
   LET ch = tb.getFirstChild()
@@ -482,13 +486,13 @@ FUNCTION hidePreviewTBActions(hide)
 END FUNCTION
 
 FUNCTION hideToolBar(tb, hide)
-  DEFINE tb, p, fNode om.DomNode
+  DEFINE tb, fNode om.DomNode
   DEFINE hide BOOLEAN
   _ASSERT(tb IS NOT NULL)
+  CALL log(SFMT("hideToolBar:%1", hide))
   IF hide THEN
     LET m_hiddenTB = tb
-    LET p = tb.getParent()
-    CALL p.removeChild(tb)
+    CALL removeFromParent(tb)
   ELSE
     IF m_hiddenTB IS NOT NULL THEN
       _ASSERT(m_hiddenTB.getParent() IS NULL)
@@ -499,16 +503,40 @@ FUNCTION hideToolBar(tb, hide)
   END IF
 END FUNCTION
 
-FUNCTION nodeFromPath(p, path)
+FUNCTION nodeFromPathInt(p, path, checked)
   DEFINE p, n om.DomNode
   DEFINE path STRING
+  DEFINE checked BOOLEAN
   DEFINE nl om.NodeList
   _ASSERT(p IS NOT NULL)
   LET nl = p.selectByPath(path)
+  IF NOT checked AND nl.getLength() < 1 THEN
+    RETURN NULL
+  END IF
   _ASSERT(nl.getLength() == 1)
   LET n = nl.item(1)
   _ASSERT(n IS NOT NULL)
   RETURN n
+END FUNCTION
+
+FUNCTION nodeFromPath(p, path)
+  DEFINE p om.DomNode
+  DEFINE path STRING
+  RETURN nodeFromPathInt(p, path, FALSE)
+END FUNCTION
+
+FUNCTION nodeFromPathChecked(p, path)
+  DEFINE p om.DomNode
+  DEFINE path STRING
+  RETURN nodeFromPathInt(p, path, TRUE)
+END FUNCTION
+
+FUNCTION getToolBarItemByName(name)
+  DEFINE name STRING
+  DEFINE tb om.DomNode
+  RETURN IIF((tb := getFormToolBar()) IS NOT NULL,
+      nodeFromPath(tb, SFMT('//ToolBarItem[@name="%1"]', name)),
+      NULL)
 END FUNCTION
 
 FUNCTION mvFromBoxToBoxInt(box1, box2, ff)
@@ -537,6 +565,7 @@ FUNCTION mvFromBoxToBox(box1, box2, ff1, ff2)
 END FUNCTION
 
 FUNCTION displayState()
+  IF fgl_getenv("VERBOSE") IS NOT NULL THEN
   DISPLAY "m_lastCRC:", m_lastCRC
   DISPLAY "m_lastCompiled4GL:", m_lastCompiled4GL
   DISPLAY "m_lastCompiledPER:", m_lastCompiledPER
@@ -544,14 +573,14 @@ FUNCTION displayState()
   DISPLAY "m_savedlines:", util.JSON.stringify(m_savedlines)
   DISPLAY "m_cmRec:", util.JSON.stringify(m_cmRec)
   DISPLAY "m_cm:", m_cm
+  END IF
 END FUNCTION
 
 FUNCTION togglePreviewOrient1()
   DEFINE fNode, ff1, p om.DomNode
   CALL markCursor()
   LET fNode = getCurrentFormNode()
-  LET ff1 = nodeFromPath(fNode, '//FormField[@name="formonly.cm"]')
-  --LET ff = nodeFromPath(fNode, '//FormField[@name="formonly.webpreview"]')
+  LET ff1 = nodeFromPathChecked(fNode, '//FormField[@name="formonly.cm"]')
   LET p = ff1.getParent()
   _ASSERT(p.getTagName() == "Grid")
   LET p = p.getParent()
@@ -560,44 +589,91 @@ FUNCTION togglePreviewOrient1()
   --CALL displayState()
 END FUNCTION
 
+FUNCTION nodeForPreview()
+  RETURN nodeFromPathChecked(
+      getCurrentFormNode(), '//FormField[@name="formonly.webpreview"]')
+END FUNCTION
+
 FUNCTION togglePreviewOrient2()
   DEFINE fNode, ff1, ff2, p, p2, vbox, hbox om.DomNode
   DEFINE ptag STRING
   _ASSERT(m_PreviewOrient IS NOT NULL)
   LET fNode = getCurrentFormNode()
-  LET ff1 = nodeFromPath(fNode, '//FormField[@name="formonly.cm"]')
-  LET ff2 = nodeFromPath(fNode, '//FormField[@name="formonly.webpreview"]')
+  LET ff1 = nodeFromPathChecked(fNode, '//FormField[@name="formonly.cm"]')
+  LET ff2 = nodeForPreview()
   LET p = ff1.getParent()
   _ASSERT(p.getTagName() == "Grid")
   LET p = p.getParent()
   LET ptag = p.getTagName()
-  DISPLAY "m_PreviewOrient:", m_PreviewOrient, ",ptag:", ptag
+  CALL log(SFMT("m_PreviewOrient:%1,ptag:%2", m_PreviewOrient, ptag))
   IF ptag == "HBox" AND m_PreviewOrient == "VBox"
       OR ptag == "VBox" AND m_PreviewOrient == "HBox" THEN
     CALL ff2.setAttribute("hidden", "0")
     LET p2 = ff2.getParent()
     _ASSERT(p2.getTagName() == "Grid")
     CALL p2.setAttribute("hidden", "0")
-    DISPLAY "orient already ok"
+    --DISPLAY "orient already ok"
   ELSE
     IF ptag == "HBox" AND m_PreviewOrient == "HBox" THEN
-      LET vbox = nodeFromPath(fNode, '//VBox[@name="fglcm_vbox"]')
+      LET vbox = nodeFromPathChecked(fNode, '//VBox[@name="fglcm_vbox"]')
       CALL mvFromBoxToBox(p, vbox, ff1, ff2)
     ELSE
       _ASSERT(m_PreviewOrient == "VBox")
-      LET hbox = nodeFromPath(fNode, '//HBox[@name="fglcm_hbox"]')
+      LET hbox = nodeFromPathChecked(fNode, '//HBox[@name="fglcm_hbox"]')
       CALL mvFromBoxToBox(p, hbox, ff1, ff2)
     END IF
   END IF
   CALL resetGBCWebCo()
+  CALL hidePreview(FALSE)
+END FUNCTION
+
+FUNCTION togglePreviewVisibility()
+  DEFINE fNode, grid om.DomNode
+  DEFINE gridhidden, isNowHidden BOOLEAN
+  LET fNode = getCurrentFormNode()
+  LET grid = nodeFromPathChecked(fNode, '//Grid[@name="fglcm_grid_webpreview"]')
+  LET gridhidden = grid.getAttribute("hidden") == "1"
+  LET isNowHidden = NOT gridhidden
+  CALL hidePreview(isNowHidden)
 END FUNCTION
 
 FUNCTION hidePreview(hide)
-  DEFINE hide BOOLEAN
+  DEFINE hide, vert BOOLEAN
   DEFINE f ui.Form
+  DEFINE tbi, tbo, ff2, p om.DomNode
   LET f = getCurrentForm()
   CALL f.setElementHidden("fglcm_grid_webpreview", hide)
   CALL f.setFieldHidden("formonly.webpreview", hide)
+  IF (tbi := getToolBarItemByName("toggle_preview_visibility")) IS NOT NULL THEN
+    LET ff2 = nodeForPreview()
+    IF NOT hide AND ff2 == m_dummyFF THEN
+      _ASSERT(m_previewFF IS NOT NULL)
+      LET ff2 = m_previewFF
+      CALL edit2webco()
+      CALL f.setFieldHidden("formonly.webpreview", hide)
+    END IF
+    _ASSERT((p := ff2.getParent()) IS NOT NULL)
+    _ASSERT((p := p.getParent()) IS NOT NULL)
+    LET vert = p.getTagName() == "VBox"
+    LET tbo = getToolBarItemByName("toggle_preview_orient")
+    _ASSERT(tbo IS NOT NULL)
+    IF hide THEN
+      CALL tbi.setAttribute("text", "Show Split Preview")
+      CALL tbi.setAttribute(
+          "image", IIF(vert, "fa-toggle-up", "fa-toggle-left"))
+      CALL tbo.setAttribute("hidden", "1")
+    ELSE
+      CALL tbi.setAttribute("text", "Hide Split Preview")
+      CALL tbi.setAttribute(
+          "image", IIF(vert, "fa-toggle-down", "fa-toggle-right"))
+      CALL tbo.setAttribute("hidden", "0")
+      CALL tbo.setAttribute(
+          "image", IIF(vert, "preview_horizontal.svg", "preview_vertical.svg"))
+      CALL tbo.setAttribute("text", IIF(vert, "Split Horiz.", "Split Vert."))
+    END IF
+  ELSE
+    --DISPLAY "no toggle_preview_visibility item found:"
+  END IF
   {
   IF NOT wasHidden AND m_previewHidden THEN
     CALL os.Path.delete(getSession42f()) RETURNING dummy
@@ -611,13 +687,12 @@ FUNCTION openMainWindow()
   CALL fgl_refresh()
   LET w = ui.Window.forName("screen")
   IF w IS NOT NULL THEN
-    DISPLAY "close screen"
+    --DISPLAY "close screen"
     CLOSE WINDOW screen
   END IF
   OPEN WINDOW fglcm AT 1, 1 WITH 10 ROWS, 10 COLUMNS
   CALL displayForm()
   CALL checkFiddleBar()
-  CALL hideOrShowPreview()
 END FUNCTION
 
 FUNCTION displayForm()
@@ -627,6 +702,9 @@ FUNCTION displayForm()
   OPEN FORM fglcm FROM "fglcm"
   DISPLAY FORM fglcm
   LET m_mainFormOpen = TRUE
+  LET m_previewFF = NULL
+  LET m_dummyFF = NULL
+  CALL webco2edit()
 END FUNCTION
 
 PRIVATE FUNCTION open_prepare()
@@ -703,7 +781,7 @@ FUNCTION doFileSave()
       CALL resetNewFile()
       CALL mysetTitle()
     END IF
-    DISPLAY "saved to:", m_srcfile
+    CALL log(SFMT("saved to:%1", m_srcfile))
     CALL savelines()
     CALL initialize_when(TRUE)
     CALL compileTmp(FALSE)
@@ -731,12 +809,12 @@ END FUNCTION
 FUNCTION doFileNew()
   DEFINE ans STRING
   IF (ans := checkFileSave()) = S_CANCEL THEN
-    DISPLAY "doFileNew checkFileSave S_CANCEL"
+    CALL log("doFileNew checkFileSave S_CANCEL")
     RETURN
   END IF
   CALL initialize_when(TRUE)
   IF file_new(NULL) == S_CANCEL THEN
-    DISPLAY "doFileNew file_new S_CANCEL"
+    CALL log("doFileNew file_new S_CANCEL")
     RETURN
   END IF
   CALL display_full(FALSE, FALSE)
@@ -841,10 +919,9 @@ PRIVATE FUNCTION displayPickList()
       LET arr[arr.getLength() + 1] = el
     END IF
   END FOR
-  DISPLAY "m_recents:",
-      util.JSON.stringify(m_recents),
-      ",arr:",
-      util.JSON.stringify(arr)
+  CALL log(
+      SFMT("m_recents:%1,arr:%2",
+          util.JSON.stringify(m_recents), util.JSON.stringify(arr)))
   IF arr.getLength() == 0 THEN
     CALL fgl_winMessage(
         "fglcm", "There are no alternate files you did edit previously", "info")
@@ -935,14 +1012,14 @@ FUNCTION run_demos()
   END IF
   LET tmp = os.Path.makeTempName()
   LET cmd = cmd, "fglrun ", cmdemo, " >", tmp, " 2>&1"
-  DISPLAY "Run demo:", cmd
+  CALL log(SFMT("Run demo:%1", cmd))
   RUN cmd RETURNING code
   IF code == 0 THEN
     LET ch = base.Channel.create()
     TRY
       CALL ch.openFile(tmp, "r")
       WHILE (line := ch.readLine()) IS NOT NULL
-        DISPLAY "line:", line
+        --DISPLAY "line:", line
         LET lastline = line
       END WHILE
       CALL ch.close()
@@ -950,7 +1027,7 @@ FUNCTION run_demos()
         CALL myERROR("Can't find COPY2FIDDLE")
       ELSE
         LET cname = lastline.subString(13, lastline.getLength())
-        DISPLAY "!!!cname:", cname
+        --DISPLAY "!!!cname:", cname
       END IF
     CATCH
       CALL myERROR(SFMT("read failed:%1", err_get(status)))
@@ -1020,7 +1097,7 @@ FUNCTION checkAppDataXCF()
   END IF
   LET gasappdatadir = mydir(gaspub)
   LET gasappdatadir = myjoin(gasappdatadir, "app")
-  DISPLAY "gaspub:", gaspub, ",gasappdatadir:", gasappdatadir
+  --DISPLAY "gaspub:", gaspub, ",gasappdatadir:", gasappdatadir
   CALL writeXCF(gasappdatadir, "fglcm_webpreview")
   CALL writeXCF(gasappdatadir, "spex")
 END FUNCTION
@@ -1057,7 +1134,7 @@ FUNCTION writeXCF(gasappdatadir, appname)
   END TRY
   CALL c.writeLine(xcfcontent)
   CALL c.close()
-  DISPLAY "Did write XCF:", xcfname, ",with Content:", xcfcontent
+  --DISPLAY "Did write XCF:", xcfname, ",with Content:", xcfcontent
 END FUNCTION
 
 FUNCTION livePreview(tmpname)
@@ -1066,7 +1143,7 @@ FUNCTION livePreview(tmpname)
   UNUSED_VAR(tmpname)
   UNUSED_VAR(liveurl)
   IF NOT m_gbcInitSeen THEN
-    DISPLAY "livePreview:no init"
+    CALL log("livePreview:no init")
     RETURN
   END IF
   CALL initGBC()
@@ -1171,9 +1248,9 @@ FUNCTION compileAllForms(dirpath)
     IF os.Path.exists(name42f) THEN
       LET mtper = os.Path.mtime(fname)
       LET mt42f = os.Path.mtime(name42f)
-      DISPLAY SFMT("%1 mtper:%2,mt42f:%3", fname, mtper, mt42f)
+      CALL log(SFMT("%1 mtper:%2,mt42f:%3", fname, mtper, mt42f))
       IF mt42f >= mtper THEN
-        DISPLAY SFMT("%1 already compiled", fname)
+        CALL log(SFMT("%1 already compiled", fname))
         CONTINUE WHILE
       END IF
     END IF
@@ -1199,7 +1276,7 @@ FUNCTION copyTmp2Real42f(tmpname)
       myjoin(
           os.Path.dirName(tmp42f),
           tmp42fLast.subString(3, tmp42fLast.getLength()))
-  DISPLAY "tmp42f:", tmp42f, ",real42f:", real42f
+  CALL log(SFMT("tmp42f:%1,real42f:%2", tmp42f, real42f))
   CALL os.Path.copy(tmp42f, real42f) RETURNING code
   RETURN real42f
 END FUNCTION
@@ -1323,10 +1400,10 @@ FUNCTION fcsync() --called if our topmenu fired an action
     CALL log("fcsync:no init seen yet")
     RETURN
   END IF
-  DISPLAY "!!!!fcsync called!!!!"
+  --DISPLAY "!!!!fcsync called!!!!"
   CALL ui.Interface.frontCall(
       "webcomponent", "call", ["formonly.cm", "fcsync"], [newVal])
-  DISPLAY "newVal:", newVal
+  --DISPLAY "newVal:", newVal
 
   CALL syncInt(newVal)
 END FUNCTION
@@ -1336,8 +1413,9 @@ FUNCTION sync() --called if the webco fired an action
   DEFINE buf STRING
   LET buf = fgl_dialog_getbuffer()
   CALL util.JSON.parse(buf, cmRec)
-  DISPLAY SFMT("sync(): cmRec.syncNum:%1,m_lastSyncNum:%2,cmRec.vm:%3",
-      cmRec.syncNum, m_lastSyncNum, cmRec.vm)
+  CALL log(
+      SFMT("sync(): cmRec.syncNum:%1,m_lastSyncNum:%2,cmRec.vm:%3",
+          cmRec.syncNum, m_lastSyncNum, cmRec.vm))
   IF cmRec.vm == TRUE
       OR cmRec.syncNum IS NULL
       OR cmRec.syncNum <= m_lastSyncNum THEN
@@ -1370,8 +1448,9 @@ PRIVATE FUNCTION syncInt(newVal)
     IF orgnum >= 1 AND orgnum <= m_orglines.getLength() THEN
       LET line = cmRec.modified[i].line
       IF checkChanged(line, m_orglines[orgnum].line) THEN
-        DISPLAY SFMT("patch line:%1 from:'%2' to:'%3'",
-            orgnum, m_orglines[orgnum].line, line)
+        CALL log(
+            SFMT("patch line:%1 from:'%2' to:'%3'",
+                orgnum, m_orglines[orgnum].line, line))
         CALL setModified()
         LET m_orglines[orgnum].line = line
       END IF
@@ -1387,9 +1466,9 @@ PRIVATE FUNCTION syncInt(newVal)
     LET m_modified = TRUE
     LET idx = cmRec.removed[i].idx + 1
     LET len = cmRec.removed[i].len
-    DISPLAY SFMT("delete lines:%1-%2", idx, idx + len - 1)
+    CALL log(SFMT("delete lines:%1-%2", idx, idx + len - 1))
     FOR j = 1 TO len
-      DISPLAY "delete line:'", m_orglines[idx].line, "'"
+      CALL log(SFMT("delete line:'%1'", m_orglines[idx].line))
       CALL m_orglines.deleteElement(idx)
     END FOR
   END FOR
@@ -1403,7 +1482,7 @@ PRIVATE FUNCTION syncInt(newVal)
     WHILE j <= m_orglines.getLength()
       IF m_orglines[j].orgnum == orgnum THEN
         LET len = cmRec.inserts[i].ilines.getLength()
-        DISPLAY SFMT("insert %1 new lines at:%2", len, j + 1)
+        CALL log(SFMT("insert %1 new lines at:%2", len, j + 1))
         FOR z = 1 TO len
           LET insertpos = j + z
           CALL m_orglines.insertElement(insertpos)
@@ -1451,6 +1530,7 @@ PRIVATE FUNCTION flush_cm()
   LET m_cmRec.flushTimeout =
       IIF((flushTimeout IS NULL) OR flushTimeout == "0", 1000, flushTimeout)
   LET m_cm = util.JSON.stringifyOmitNulls(m_cmRec)
+  {
   IF m_cm.getLength() > 140 THEN
     DISPLAY SFMT("flush:%1...%2",
         m_cm.subString(1, 70),
@@ -1458,6 +1538,7 @@ PRIVATE FUNCTION flush_cm()
   ELSE
     DISPLAY "flush:", m_cm
   END IF
+  }
   --CALL fgl_dialog_setbuffer(m_cm)
   DISPLAY m_cm TO cm
 END FUNCTION
@@ -1471,7 +1552,7 @@ END FUNCTION
 
 FUNCTION actionPending()
   IF m_cmRec.feedAction IS NOT NULL THEN
-    DISPLAY "actionPending:", m_cmRec.feedAction
+    CALL log(SFMT("actionPending:%1", m_cmRec.feedAction))
     RETURN TRUE
   END IF
   RETURN FALSE
@@ -1492,7 +1573,7 @@ END FUNCTION
 PRIVATE FUNCTION initialize_when(initialize)
   DEFINE initialize BOOLEAN
   IF initialize THEN
-    DISPLAY "initialize m_cmRec"
+    CALL log("initialize m_cmRec")
     INITIALIZE m_cmRec.* TO NULL
   END IF
 END FUNCTION
@@ -1541,12 +1622,9 @@ PRIVATE FUNCTION display_full(initialize, flush)
         LET m_cmRec.extension = "makefile"
     END CASE
   END IF
-  DISPLAY "display_full:",
-      m_srcfile,
-      ",ext:",
-      m_cmRec.extension,
-      ",basename:",
-      basename
+  CALL log(
+      SFMT("display_full:%1,ext:%2,basename:%3",
+          m_srcfile, m_cmRec.extension, basename))
   CALL flush_when(flush)
   LET m_lastCRC = NULL
   CALL displayState()
@@ -1585,7 +1663,7 @@ END FUNCTION
 PRIVATE FUNCTION buildCompileCmd(dirname, compOrForm, cparam, fname)
   DEFINE dirname, compOrForm, cparam, fname STRING
   DEFINE cmd, baseName STRING
-  DISPLAY "buildCompileCmd dirname:", dirname
+  CALL log(SFMT("buildCompileCmd dirname:%1", dirname))
   LET baseName = os.Path.baseName(fname)
   --we cd into the directory of the source
   IF file_on_windows() THEN
@@ -1603,7 +1681,7 @@ END FUNCTION
 FUNCTION regularFromTmpName(tmpname)
   DEFINE tmpname, srcname STRING
   DEFINE atidx INT
-  IF tmpname == m_tmpname THEN
+  IF tmpname == m_tmpname AND m_srcfile IS NOT NULL THEN
     RETURN m_srcfile
   END IF
   IF (atidx := tmpname.getIndexOf(".@", 1)) > 0 THEN
@@ -1642,7 +1720,7 @@ PRIVATE FUNCTION compile_source(fname, proposals)
   LET compOrForm = IIF(isPER, "fglform", "fglcomp")
   LET cmd = buildCompileCmd(dirname, compOrForm, cparam, fname)
   CALL compile_arr.clear()
-  DISPLAY "cmd=", cmd
+  CALL log(SFMT("compile_source cmd=%1", cmd))
   IF proposals THEN
     --DISPLAY "cmd=",cmd
   END IF
@@ -1692,11 +1770,11 @@ PRIVATE FUNCTION compile_source(fname, proposals)
     END IF
   END IF
   IF tmpName IS NOT NULL THEN
-    DISPLAY "delete tmpName:", tmpName
+    CALL log(SFMT("delete tmpName:%1", tmpName))
     CALL os.Path.delete(tmpName) RETURNING dummy
   END IF
   IF tmpName2 IS NOT NULL THEN
-    DISPLAY "delete tmpName2:", tmpName
+    CALL log(SFMT("delete tmpName2:%1", tmpName))
     CALL os.Path.delete(tmpName2) RETURNING dummy
   END IF
   RETURN result
@@ -1752,7 +1830,7 @@ FUNCTION appendToLog(title, s)
   IF logfile IS NULL THEN
     RETURN
   END IF
-  DISPLAY "FGLCM_LOGFILE is:", logfile
+  CALL log(SFMT("FGLCM_LOGFILE is:%1", logfile))
   LET ch = base.Channel.create()
   TRY
     CALL ch.openFile(logfile, "a")
@@ -1780,7 +1858,7 @@ END FUNCTION
 
 PRIVATE FUNCTION setModified()
   IF NOT m_modified THEN
-    DISPLAY "setModified() TRUE"
+    CALL log("setModified() TRUE")
     LET m_modified = TRUE
   END IF
 END FUNCTION
@@ -1788,7 +1866,7 @@ END FUNCTION
 PRIVATE FUNCTION checkChangedArray()
   DEFINE savelen, len, i INT
   IF m_modified == FALSE THEN
-    DISPLAY "checkChangedArray() no mod"
+    CALL log("checkChangedArray() no mod")
     RETURN FALSE
   END IF
   LET savelen = m_savedlines.getLength()
@@ -1827,7 +1905,7 @@ PRIVATE FUNCTION my_write(fname, internal)
     CALL fgl_winMessage(S_ERROR, SFMT("Can't write to:%1", fname), IMG_ERROR)
     RETURN FALSE
   END IF
-  DISPLAY "did write to:", fname
+  CALL log(SFMT("did write to:%1", fname))
   RETURN TRUE
 END FUNCTION
 
@@ -2050,13 +2128,14 @@ PRIVATE FUNCTION file_write(srcfile, internal)
   DEFINE result INT
   LET start = CURRENT
   LET result = file_write_int(srcfile, "w", internal)
-  DISPLAY "time for file_write:", CURRENT - start, ",m_lastCRC:", m_lastCRC
+  CALL log(
+      SFMT("time for file_write:%1,m_lastCRC:%2", CURRENT - start, m_lastCRC))
   IF internal
       AND m_lastCRC IS NOT NULL
       AND (m_CRCProg IS NOT NULL OR file_on_mac()) THEN
     LET start = CURRENT
     CALL checkCRCSum(srcfile)
-    DISPLAY "time for cksum:", CURRENT - start, ",crc32:", m_cmRec.crc
+    CALL log(SFMT("time for cksum:%1,crc32:%2", CURRENT - start, m_cmRec.crc))
   END IF
   RETURN result
 END FUNCTION
@@ -2071,7 +2150,7 @@ FUNCTION getCRCSum(fname)
     LET cmd = SFMT("cksum -o 3 %1", fname)
   END IF
   LET s = file_get_output_string(cmd)
-  DISPLAY SFMT("%1 returned:%2", cmd, s)
+  CALL log(SFMT("%1 returned:%2", cmd, s))
   LET tok = base.StringTokenizer.create(s, " ")
   LET first = tok.nextToken()
   RETURN first
@@ -2249,7 +2328,9 @@ END FUNCTION
 
 FUNCTION log(msg)
   DEFINE msg STRING
-  DISPLAY "LOG:", msg
+  IF fgl_getenv("VERBOSE") IS NOT NULL THEN
+    DISPLAY "LOG:", msg
+  END IF
 END FUNCTION
 
 FUNCTION qaSetFileNewExt(ext)
@@ -2520,7 +2601,7 @@ FUNCTION fglped_saveasdlg(fname)
   IF filename IS NULL THEN
     RETURN NULL
   END IF
-  DISPLAY "filename:", filename
+  CALL log(SFMT("fglped_saveasdlg filename:%1", filename))
   LET newext = os.Path.extension(filename)
   IF newext.getLength() == 0 AND ext.getLength() > 0 THEN
     LET filename = filename, ".", ext
@@ -2618,7 +2699,7 @@ PRIVATE FUNCTION loadKeywords()
   LET start = CURRENT
   CALL loadKeywordsFor("fgl", "4gl")
   CALL loadKeywordsFor("per", "per")
-  DISPLAY "time for loadKeywords:", CURRENT - start
+  CALL log(SFMT("time for loadKeywords:%1", CURRENT - start))
 END FUNCTION
 
 #+ looks up the vim syntax files
@@ -2786,7 +2867,7 @@ FUNCTION mergeADList(f, adlist)
   LET tmpName = os.Path.makeTempName()
   CALL os.Path.delete(tmpName) RETURNING status
   LET tmpName = tmpName, ".4ad"
-  DISPLAY "tmpName:", tmpName
+  CALL log(SFMT("mergeADList tmpName:%1", tmpName))
   CALL nadlist.writeXml(tmpName)
   CALL f.loadActionDefaults(tmpName)
   CALL os.Path.delete(tmpName) RETURNING status
@@ -2818,7 +2899,7 @@ FUNCTION mergeTopMenu(f, topmenu)
   LET tmpName = os.Path.makeTempName()
   CALL os.Path.delete(tmpName) RETURNING status
   LET tmpName = tmpName, ".4tm"
-  DISPLAY "tmpName:", tmpName
+  CALL log(SFMT("mergeTopMenu tmpName:%1", tmpName))
   CALL ntm1.writeXml(tmpName)
   CALL f.loadTopMenu(tmpName)
   CALL os.Path.delete(tmpName) RETURNING status
@@ -2844,12 +2925,48 @@ FUNCTION getStyleListNode()
   RETURN NULL
 END FUNCTION
 
+FUNCTION webco2edit()
+  DEFINE pNode, pp1, pp2, ch om.DomNode
+  LET pNode = nodeForPreview()
+  LET ch = pNode.getFirstChild()
+  IF ch.getTagName() == "WebComponent" THEN
+    IF m_dummyFF IS NULL THEN
+      LET m_dummyFF =
+          nodeFromPathChecked(
+              getCurrentFormNode(), '//FormField[@name="formonly.edummy"]')
+      CALL m_dummyFF.setAttribute("colName", "webpreview")
+      CALL m_dummyFF.setAttribute("name", "formonly.webpreview")
+      LET pp2 = m_dummyFF.getParent()
+      CALL pp2.removeChild(m_dummyFF)
+    END IF
+    --DISPLAY "--->mv Webco to tmp"
+    LET m_previewFF = pNode
+    LET pp1 = pNode.getParent()
+    CALL pp1.removeChild(m_previewFF)
+    CALL pp1.appendChild(m_dummyFF)
+  END IF
+END FUNCTION
+
+FUNCTION edit2webco()
+  DEFINE pNode, ch, pp1 om.DomNode
+  LET pNode = nodeForPreview()
+  LET ch = pNode.getFirstChild()
+  IF ch.getTagName() == "Edit" THEN
+    --DISPLAY "--->mv Webco back into form"
+    _ASSERT(m_previewFF IS NOT NULL)
+    LET pp1 = pNode.getParent()
+    CALL pp1.replaceChild(m_previewFF, pNode)
+    LET m_previewFF = NULL
+  END IF
+END FUNCTION
+
 FUNCTION initGBC()
   DEFINE tmp42f STRING
   LET m_gbcInitSeen = TRUE
   IF NOT isPERFile(m_tmpname) THEN
-    CALL buildX("test")
+    CALL webco2edit()
   ELSE
+    CALL edit2webco()
     LET tmp42f = m_lastCompiledPER
     LET tmp42f = tmp42f.subString(1, tmp42f.getLength() - 4)
     CALL buildX(tmp42f)
@@ -2862,7 +2979,7 @@ FUNCTION buildX(frmName)
   DEFINE root, origList, p om.DomNode
   DEFINE win ui.Window
   DEFINE f ui.Form
-  DISPLAY "buildX:", frmName
+  --DISPLAY "buildX:", frmName
   LET origList = getStyleListNode()
   LET p = origList.getParent()
   OPEN WINDOW _formpreview WITH FORM frmName
@@ -2904,6 +3021,7 @@ FUNCTION buildOM(node, removeId)
   CALL b.append("}")
   CALL b.append("}\n")
   LET m_omCount = m_omCount + 1
+  --DISPLAY "buildOM:", b.toString()
   RETURN b.toString()
 END FUNCTION
 
@@ -2917,16 +3035,16 @@ FUNCTION buildListInt(n, b)
     WHEN tag == "Window"
       LET name = n.getAttribute("name")
       IF name.equals("_formpreview") THEN
-        DISPLAY "our window"
+        --DISPLAY "our window"
         LET m_lastWindowId = n.getId()
       ELSE
-        DISPLAY "omit WIndow:", name
+        --DISPLAY "omit WIndow:", name
         RETURN
       END IF
       --WHEN tag=="Form"
       --  LET m_lastFormId=n.getId()
     WHEN tag == "Message"
-      DISPLAY "ignore message"
+      --DISPLAY "ignore message"
       RETURN
   END CASE
 
@@ -3091,7 +3209,7 @@ FUNCTION findScriptOrLink(l STRING, dir STRING)
       LET d["t"] = getLastModified(fn2)
       LET fn3 = formatUrl(fn, d)
       LET l = l.subString(1, i4), fn3, l.subString(i5, l.getLength())
-      DISPLAY "did format l:", l
+      --DISPLAY "did format l:", l
     ELSE
       DISPLAY "fn2:", fn2, " does not exists"
     END IF
@@ -3119,7 +3237,7 @@ FUNCTION patch_webco(compo STRING)
     LET fn = compo, ".html"
   END IF
   LET dir = os.Path.dirName(fn)
-  DISPLAY "patch_webco:", fn
+  --DISPLAY "patch_webco:", fn
   LET ch = base.Channel.create()
   LET co = base.Channel.create()
   LET tmp = os.Path.makeTempName()
@@ -3134,12 +3252,13 @@ FUNCTION patch_webco(compo STRING)
   CALL co.close()
   IF os.Path.size(fn) <> os.Path.size(tmp)
       OR (NOT file_equal(fn, tmp, FALSE)) THEN
-    DISPLAY SFMT("copy:%1 (%2 bytes) over:%3 (%4 bytes)",
-        tmp, os.Path.size(tmp), fn, os.Path.size(fn))
+    CALL log(
+        SFMT("copy:%1 (%2 bytes) over:%3 (%4 bytes)",
+            tmp, os.Path.size(tmp), fn, os.Path.size(fn)))
     CALL os.Path.copy(tmp, fn) RETURNING status
     CALL os.Path.delete(tmp) RETURNING status
   ELSE
-    DISPLAY "file equal:", tmp, " to:", fn
+    --DISPLAY "file equal:", tmp, " to:", fn
   END IF
 END FUNCTION
 
@@ -3169,7 +3288,7 @@ FUNCTION file_equal_txtfile(f1, f2)
   LET s2 = t2
   --DISPLAY "file_equal_txtfile: ",f1," ",f2
   IF NOT s1.equals(s2) THEN
-    DISPLAY "not equal:", f1, "<>", f2
+    --DISPLAY "not equal:", f1, "<>", f2
     IF NOT isWin() THEN
       RUN SFMT("diff %1 %2", quote(f1), quote(f2))
     END IF
@@ -3253,7 +3372,7 @@ PRIVATE FUNCTION _findGBCIn(dirname)
       AND os.Path.exists(os.Path.join(dirname, "index.html"))
       AND os.Path.exists(os.Path.join(dirname, "VERSION")) THEN
     LET m_gbcdir = dirname
-    DISPLAY "m_gbcdir:'", m_gbcdir, "'"
+    --DISPLAY "m_gbcdir:'", m_gbcdir, "'"
     RETURN TRUE
   END IF
   RETURN FALSE

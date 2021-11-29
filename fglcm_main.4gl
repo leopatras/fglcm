@@ -20,11 +20,13 @@ FUNCTION main2(enter_main_loop)
   END IF
   CALL fglcm.openMainWindow()
   CALL fglcm_ext.initMainWindow()
+  CALL fglcm.hideOrShowPreview()
   IF enter_main_loop THEN
     WHILE edit_source()
       CALL fglcm.displayForm()
       CALL fglcm_ext.initMainWindow()
-      CALL fglcm.before_input(NULL,FALSE)
+      --CALL fglcm.hideOrShowPreview()
+      CALL fglcm.before_input(NULL, FALSE)
     END WHILE
   END IF
 END FUNCTION
@@ -41,18 +43,18 @@ PRIVATE FUNCTION edit_source()
       ATTRIBUTE(ACCEPT = FALSE, CANCEL = FALSE)
     BEFORE INPUT
       CALL fglcm.before_input(DIALOG,TRUE)
-      CALL DIALOG.setActionActive("preview_toggle_orient","0")
+      CALL DIALOG.setActionActive("toggle_preview_orient", "0")
 
     ON ACTION fglcm_init ATTRIBUTE(DEFAULTVIEW = NO) --invoked by the editor
       CALL fglcm.setInitSeen()
-      CALL DIALOG.setActionActive("preview_toggle_orient","1")
+      CALL DIALOG.setActionActive("toggle_preview_orient", "1")
 
     ON ACTION run
       CALL fglcm.sync()
       CALL fglcm.runprog()
 
     ON ACTION preview
-      CALL fglcm.sync() 
+      CALL fglcm.sync()
       CALL fglcm.preview_form()
 
     ON ACTION showpreviewurl
@@ -118,26 +120,20 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.sync()
       CALL fglcm.formatSource()
 
-    ON ACTION show_preview
+    ON ACTION toggle_preview_visibility
       CALL fglcm.sync()
-      CALL fglcm.hidePreview(FALSE)
+      CALL fglcm.togglePreviewVisibility()
 
-    ON ACTION hide_preview
-      CALL fglcm.sync()
-      CALL fglcm.hidePreview(TRUE)
-
-    ON ACTION preview_toggle_orient
+    ON ACTION toggle_preview_orient
       CALL fglcm.sync()
       CALL fglcm.togglePreviewOrient1()
-      DISPLAY "after toggle"
       RETURN TRUE
 
     ON ACTION urready
       DISPLAY "urready"
       CALL fglcm.initGBC()
       LET diff = CURRENT - starttime
-      DISPLAY "diff=",diff
-
+      DISPLAY "diff=", diff
 
     ON ACTION getlog
       CALL ui.Interface.frontCall(
@@ -187,6 +183,5 @@ PRIVATE FUNCTION edit_source()
       CALL fglcm.browse_demos()
 
   END INPUT
-  DISPLAY "after end input"
   RETURN FALSE
 END FUNCTION

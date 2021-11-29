@@ -13,9 +13,9 @@ END FUNCTION
 
 PRIVATE FUNCTION loadTB(f)
   DEFINE f ui.Form
-  DEFINE tb STRING  
-  LET tb=IIF(os.Path.exists(TBNAME),TBNAME,
-             extPath(TBNAME))
+  DEFINE name, tb STRING
+  LET name = IIF(fgl_getenv("FGLFIDDLE") IS NOT NULL, "fglfiddle.4tb", TBNAME)
+  LET tb = IIF(os.Path.exists(name), name, extPath(name))
   CALL f.loadToolBar(tb)
 END FUNCTION
 

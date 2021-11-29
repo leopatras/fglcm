@@ -78,12 +78,12 @@ cmdemo.42f: $(FGLDIR)/demo/demo.sch cmdemo.per
 	FGLDBPATH=$(FGLDIR)/demo fglform -M -Wall cmdemo.per
 
 runcmdemo: cmdemo.42m cmdemo.42f
-	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun -d cmdemo
+	FGLLDPATH=$(CURDIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo fglrun cmdemo
 
 fiddle: all cmdemo.42m cmdemo.42f
 	rm -rf home&&mkdir home
 	cp main.4gl main.per home/
-	cd home && ls && FGLIMAGEPATH=$(CURDIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLCM_EXT_DIR):$(FGLDIR)/demo FGLDBPATH=$(FGLDIR)/demo FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home fglrun $(CURDIR)/fglcm_main.42m main.4gl
+	cd home && ls && FGLIMAGEPATH=$(CURDIR):$(FGLCM_EXT_DIR):$(FGLDIR)/lib/image2font.txt FGLLDPATH=$(CURDIR):$(FGLCM_EXT_DIR):$(FGLDIR)/demo DBPATH=$(FGLDIR)/demo:$(FGLCM_EXT_DIR) FGLDBPATH=$(FGLDIR)/demo:$(FGLCM_EXT_DIR) FGLFIDDLE=1 FGLCMDIR=$(CURDIR) FGLCMHOME=$(CURDIR)/home fglrun $(CURDIR)/fglcm_main.42m main.4gl
 
 webfiddle: all cmdemo.42m cmdemo.42f
 	#rm -rf home&&mkdir home

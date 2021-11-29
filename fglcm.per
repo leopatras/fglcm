@@ -22,8 +22,8 @@ ACTION DEFAULTS
   --ACTION findword (TEXT="Find Word", COMMENT="Finds the next occurence of the word the cursor is over" ,ACCELERATOR=CONTROL-W)
   ACTION gotoline (TEXT="Goto Line...", COMMENT="Opens a dialog to go to a line number" ,ACCELERATOR=ALT-L,ACCELERATOR2=CONTROL-L,DEFAULTVIEW=NO)
   ACTION showpreviewurl(TEXT="Show Preview URL",COMMENT="Enables copying the preview URL to other clients")
-  ACTION show_preview(TEXT="Show Preview",COMMENT="Shows the live GBC preview",IMAGE="fa-toggle-left")
-  ACTION hide_preview(TEXT="Hide Preview",COMMENT="Hides the live GBC preview",IMAGE="fa-toggle-right")
+  --ACTION show_preview(TEXT="Show Preview",COMMENT="Shows the live GBC preview",IMAGE="fa-toggle-left")
+  --ACTION hide_preview(TEXT="Hide Preview",COMMENT="Hides the live GBC preview",IMAGE="fa-toggle-right")
 END
 
 TOPMENU
@@ -69,15 +69,15 @@ TOPMENU
   --END 
 END
 
---TOOLBAR fiddlebar
---  ITEM browse_demos(TEXT="Demos",IMAGE="fa-sitemap",COMMENT="Browse demos and select samples")
---  SEPARATOR
---  ITEM main4gl(TEXT="Program",IMAGE="fa-file-text-o",COMMENT="Main source (main.4gl)")
---  ITEM run
---  SEPARATOR
---  ITEM mainper(TEXT="Form",IMAGE="fa-list-alt",COMMENT="Main form (main.per)")
---  ITEM preview(HIDDEN)
---END
+TOOLBAR fiddlebar
+  ITEM browse_demos(TEXT="Demos",IMAGE="fa-sitemap",COMMENT="Browse demos and select samples")
+  SEPARATOR
+  ITEM main4gl(TEXT="Program",IMAGE="fa-file-text-o",COMMENT="Main source (main.4gl)")
+  ITEM run
+  SEPARATOR
+  ITEM mainper(TEXT="Form",IMAGE="fa-list-alt",COMMENT="Main form (main.per)")
+  ITEM preview(HIDDEN)
+END
 
 LAYOUT(STYLE="cm",MINHEIGHT=40,MINWIDTH=90)
 VBOX fglcm_main
@@ -92,6 +92,11 @@ GRID fglcm_grid_webpreview(HIDDEN)
 [webpreview                                                 ]
 }
 END -- GRID
+GRID fglcm_grid_dummy(HIDDEN)
+{
+[edummy]
+}
+END
 END -- HBOX fglcm_hbox
 VBOX fglcm_vbox(SPLITTER)
 GRID must_have_dummy(HIDDEN)
@@ -109,4 +114,5 @@ END --VBOX
 ATTRIBUTES
 WEBCOMPONENT cm=FORMONLY.cm,COMPONENTTYPE="fglcm",STRETCH=BOTH,HEIGHT=25,SIZEPOLICY=FIXED;
 WEBCOMPONENT webpreview=FORMONLY.webpreview,COMPONENTTYPE="gbc",STRETCH=BOTH,HEIGHT=25,SIZEPOLICY=FIXED,HIDDEN;
-LABEL info=FORMONLY.info;
+EDIT edummy=FORMONLY.edummy;
+LABEL info=FORMONLY.info,SIZEPOLICY=FIXED;
