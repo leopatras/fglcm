@@ -20,12 +20,15 @@ then
   export FGLCM_EXT_DIR="$FGLCMDIR/ext"
 fi
 export FGLLDPATH="$FGLCM_EXT_DIR:$FGLCMDIR:$FGLCMDIR/fglwebrun:$FGLLDPATH"
+#echo "FGLLDPATH:$FGLLDPATH"
 #we recompile everything always: hence avoid version clashes
 make -C $FGLCMDIR clean_prog all > /dev/null
 export FGLCMDIR
-FGLCM_LOGFILE=`mktemp`
-rm -f $FGLCM_LOGFILE
+#remove depend module, we only want ext/fglcm_ext.42m
+rm -f "$FGLCMDIR/fglcm_ext.42m"
+#FGLCM_LOGFILE=/`mktemp`
+#rm -f $FGLCM_LOGFILE
 export FGLCM_LOGFILE="$FGLCM_LOGFILE.log"
-echo "logging into $FGLCM_LOGFILE" 
-exec fglrun --start-guilog=$FGLCM_LOGFILE $FGLCMDIR/fglcm_main.42m "$@" 
-#exec fglrun $FGLCMDIR/fglcm_main.42m "$@" 
+#echo "logging into $FGLCM_LOGFILE"
+#exec fglrun --start-guilog=$FGLCM_LOGFILE $FGLCMDIR/fglcm_main.42m "$@"
+exec fglrun $FGLCMDIR/fglcm_main.42m "$@"
