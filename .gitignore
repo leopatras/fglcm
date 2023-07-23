@@ -7,6 +7,8 @@
 .@*.*
 #debugger files
 *.fgldeb
+#linux crc checker
+crc32
 
 #generated on the fly
 webcomponents/fglcm/customMode/4gl.js
