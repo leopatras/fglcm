@@ -5,6 +5,8 @@
 .submodule
 #temp files
 .@*.*
+#debugger files
+*.fgldeb
 
 #generated on the fly
 webcomponents/fglcm/customMode/4gl.js
