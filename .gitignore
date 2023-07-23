@@ -1,7 +1,5 @@
-*.42?
-*.fgldeb
-.@*.4gl
-.@*.per
-webcomponents/fglcm/customMode/4gl.js
-webcomponents/fglcm/customMode/per.js
-result.txt
+# Ignore build files
+*.42m
+*.42f
+*.42r
+.submodule
