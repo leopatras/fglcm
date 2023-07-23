@@ -3,3 +3,11 @@
 *.42f
 *.42r
 .submodule
+#temp files
+.@*.*
+
+#generated on the fly
+webcomponents/fglcm/customMode/4gl.js
+webcomponents/fglcm/customMode/per.js
+#custom made gbc on the fly
+webcomponents/gbc/
